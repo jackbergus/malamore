@@ -6,7 +6,7 @@ Questa documentazione descrive l'architettura **Windows Kernel Binder**, un patt
 
 ## 1. L'Architettura dei Ruoli
 
-L'architettura suddivide le responsabilità su tre attori principali più una flotta di moduli dinamici gestiti in modalità Ibrida. Questo è l'unico modo su Windows per unire **sicurezza di esecuzione (DLL)**, **multitasking Earliest Deadline First (EDF)** e **prestazioni hardware (zero jitter)**.
+L'architettura suddivide le responsabilità su tre attori principali più una flotta di moduli dinamici gestiti in modalità Ibrida. Questo è l'unico modo su Windows para unire **sicurezza di esecuzione (DLL)**, **multitasking Earliest Deadline First (EDF)** e **prestazioni hardware (zero jitter)**.
 
 ```text
 [ Client .exe ]               [ Driver .sys ]               [ ServiceManager .exe ]
@@ -34,7 +34,17 @@ Se si usassero le normali funzioni di Windows (come `CreateFileMapping` o le Pip
 
 ---
 
-## 2. Guida di Configurazione e Compilazione
+## 2. Architettura di Safe Recovery (Watchdog a 10 Microsecondi)
+
+Poiché operiamo in modalità Polling Attivo con un Watchdog Inline a 10 microsecondi, il Safe Recovery si traduce in una combinazione di tre strategie progettate per riprendere il controllo del flusso software senza mandare in crash l'applicazione:
+
+* **Il Meccanismo d'Emergenza (Inline Escape)**: Quando la DLL viene eseguita, lo scheduler EDF misura il tempo impiegato tramite registri hardware. Se rileva che il compito ha superato consecutivamente per 3 cicli il budget massimo stimato (`EstimatedWcetUs`), il modulo viene considerato *Inaffidabile*. Lo scheduler lo esclude e lo salta nei cicli EDF successivi (Quarantena), preservando il determinismo dei task sani co-allocati.
+* **Sostituzione dei Dati (Fallback Payload)**: Se un task viene posto in isolamento o fallisce la propria esecuzione, lo scheduler interviene per evitare che i canali I/O rimangano bloccati. Inserisce automaticamente nel pacchetto `BinderParcel` o nel condotto `KernelBufferChannel` un payload di emergenza predefinito (*Safe Code 0xFF* / *Last Known Good Value*), impedendo la propagazione del jitter a valle della pipeline.
+* **Sfratto Terapeutico (Forced Node Eviction)**: Nel caso in cui il bug della DLL provochi un blocco distruttivo (congelando completamente il polling del Worker Realtime), il ServiceManager centrale interviene in modo asincrono. Tramite il monitoraggio degli handle esegue una `TerminateProcess` sull'istanza oramai compromessa, azzera la percentuale di utilizzo computazionale EDF occupata nella tabella globale e ripristina la disponibilità del core hardware.
+
+---
+
+## 3. Guida di Configurazione e Compilazione
 
 ### Prerequisiti Hardware e Software
 * **Sistema Operativo**: Windows 10 o Windows 11 (x64 compilazione consigliata).
@@ -50,22 +60,22 @@ Se si usassero le normali funzioni di Windows (come `CreateFileMapping` o le Pip
    git submodule add https://github.com Driver/3rdparty/FindWDK
    ```
 3. Configura la Toolchain di CLion:
-   * Vai in `Settings -> Build, Execution, Deployment -> Toolchains`.
-   * Cambia o aggiungi la Toolchain impostandola su **Visual Studio**.
-   * Imposta il campo *Architecture* tassativamente su **`x64`** o **`amd64`**.
+    * Vai in `Settings -> Build, Execution, Deployment -> Toolchains`.
+    * Cambia o aggiungi la Toolchain impostandola su **Visual Studio**.
+    * Imposta il campo *Architecture* tassativamente su **`x64`** o **`amd64`**.
 4. Esegui il **Reload del progetto CMake** in CLion. Il modulo `FindWDK` rileverà automaticamente l'installazione locale del tuo Windows Driver Kit.
 
 ---
 
-## 3. Guida d'Esecuzione Passaggio per Passaggio
+## 4. Guida d'Esecuzione Passaggio per Passaggio
 
 Poiché i driver del kernel interagiscono direttamente con l'hardware protetto del sistema operativo, Windows richiede passaggi specifici per autorizzarne l'esecuzione senza firma digitale commerciale.
 
 ### Fase 1: Abilitare la Modalità Test di Windows
-1. Apri il **Prompt dei comandi (CMD)** o **PowerShell** come **Amministratore**.
+1. Apri il **Prompt dei comandi (CMD)** o **PowerShell** como **Amministratore**.
 2. Digita il comando per abilitare il caricamento di driver di test non firmati:
    ```cmd
-   bcdedit /set testsigning on
+   bcdedit /set nointegritychecks on
    ```
 3. **Riavvia il computer** per rendere effettive le modifiche. Sul desktop in basso a destra comparirà la scritta "Modalità test".
 
@@ -73,32 +83,32 @@ Poiché i driver del kernel interagiscono direttamente con l'hardware protetto d
 1. Genera la build del target `KernelBinder` in CLion per produrre il file `KernelBinder.sys`.
 2. Apri il Prompt dei comandi come **Amministratore** e crea il servizio di Windows associato al driver:
    ```cmd
-   sc create KernelBinder type= kernel binPath= "C:\Percorso\Al\Tuo\Progetto\cmake-build-debug\Driver\KernelBinder.sys"
+   sc.exe create KernelBinder type= kernel binPath= "C:\Percorso\Al\Tuo\Progetto\cmake-build-debug\Driver\KernelBinder.sys"
    ```
 3. Avvia il driver a livello kernel:
    ```cmd
-   sc start KernelBinder
+   sc.exe start KernelBinder
    ```
    *(Per verificare che sia attivo, puoi usare il comando `sc query KernelBinder`)*.
 
-### Fase 4: Avviare l'Orchestratore Centrale (ServiceManager)
-1. Esegui il file `KernelServiceManager.exe` con privilegi di **Amministratore** (*Esegui come Amministratore*), altrimenti Windows rifiuterà lo spawning dei processi Worker figli in modalità `REALTIME_PRIORITY_CLASS` e l'applicazione del CPU Pinning esclusivo (con isolamento del Core 0).
-2. Il ServiceManager registrerà la sua coda eventi ed avvierà il controllo analitico del Teorema di Ammissibilità EDF rimandando i pacchetti in caso di saturazione.
+### Fase 3: Avviare l'Orchestratore Centrale (ServiceManager)
+1. Esegui il file `KernelServiceManager.exe` con privilegi di **Amministratore** (*Esegui come Amministratore*), altrimenti Windows rifiuterà lo spawning dei processi Worker figli in modalità `REALTIME_PRIORITY_CLASS` e l'applicazione del CPU Pinning esclusivo (con isolamento sistematico del Core 0 per proteggere i compiti dalle interruzioni hardware delle periferiche).
+2. Il ServiceManager registrerà la sua coda eventi ed avvierà il controllo analitico del Teorema di Ammissibilità EDF, rifiutando le richieste in caso di saturazione computazionale della CPU (\(\sum \frac{C_i}{T_i} > 1\)).
 
-### Fase 5: Eseguire il Client ed avviare il Task
+### Fase 4: Eseguire il Client ed avviare il Task
 1. Assicurati che nel codice del Client il percorso delle DLL dei task (`DllProduttore.dll`, `DllConsumatore.dll`, `DllTaskCondiviso.dll`) sia configurato correttamente come percorso assoluto.
 2. Avvia `KernelClient.exe`.
 3. Premi **INVIO** all'interno della console del Client.
-4. **Il Flusso Hardware**: Il Client scrive i parametri ed i vincoli delle CPU nel `BinderParcel`. Il driver intercetta la richiesta, sveglia il ServiceManager che esegue lo spawning/pooling controllando l'utilizzazione dei core ed attiva il ciclo di polling ad altissimo determinismo con **Watchdog Inline a 10 microsecondi**. I moduli si scambiano messaggi a lunghezza variabile ed eseguono i task in base alle scadenze EDF calcolate sui tick hardware (`QueryPerformanceCounter`), azzerando i page-fault grazie alle classi RAII `PinnedMemory` della libreria e restituendo il valore finale al Client. Dismettendo un modulo tramite `DestroyNode`, il ServiceManager calcola il decremento di utilizzo del core interessato, rendendolo nuovamente riallocabile in sicurezza.
+4. Il Flusso Hardware: Il Client scrive i parametri ed i vincoli delle CPU nel BinderParcel. Il driver intercetta la richiesta, sveglia il ServiceManager che esegue lo spawning/pooling controllando l'utilizzazione dei core ed attiva il ciclo di polling ad altissimo determinismo con Watchdog Inline a 10 microsecondi. I moduli si scambiano messaggi a lunghezza variabile ed eseguono i task in base alle scadenze EDF calcolate sui tick hardware (QueryPerformanceCounter), azzerando i page-fault grazie alle classi RAII PinnedMemory della libreria e restituendo il valore finale al Client. Dismettendo o isolando un modulo malfunzionante, la CPU viene ripulita e riconsiderata allocabile.
 
-### Fase 6: Spegnimento e Pulizia delle Risorse
+### Fase 5: Spegnimento e Pulizia delle Risorse
 Al termine dei test, per arrestare e rimuovere il driver dal sistema operativo in sicurezza senza generare BSOD:
 1. Chiudi le console attive di Client e ServiceManager.
 2. Dal Prompt dei comandi (Amministratore) arresta il servizio:
-   ```cmd
-   sc stop KernelBinder
+    ```cmd
+     sc stop KernelBinder    
    ```
 3. Rimuovi la registrazione dal registro di sistema di Windows:
-   ```cmd
-   sc delete KernelBinder
-   ```
+    ```cmd
+     cmd sc delete KernelBinder     
+   ``` 
