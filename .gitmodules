@@ -1,0 +1,3 @@
+[submodule "submodules/findwdk"]
+	path = submodules/findwdk
+	url = https://github.com/SergiusTheBest/FindWDK
