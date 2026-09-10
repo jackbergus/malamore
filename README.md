@@ -1,4 +1,4 @@
-# Windows Kernel Binder (Low-Latency IPC Architecture)
+# MALAMORE: Windows Kernel Binder (Low-Latency IPC Architecture)
 
 Questa documentazione descrive l'architettura **Windows Kernel Binder**, un pattern di comunicazione inter-processo (IPC) ad altissime prestazioni pensato per aggirare i limiti dello scheduler di Windows e garantire l'esecuzione deterministica di task dinamici da 10ms a basso jitter.
 
