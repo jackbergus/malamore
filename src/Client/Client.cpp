@@ -1,27 +1,44 @@
-#include "Client/KernelBinderClient.h"
+#include <Library/KernelBinderClient.h>
 #include <iostream>
 
 int main() {
     try {
-        std::cout << "[CLIENT EXECUTABLE] Inizializzazione della libreria statica...\n";
+        std::cout << "[CLIENT EXECUTABLE] Inizializzazione della Binder Proxy...\n";
+        KernelBinderClient binder;
 
-        // Istanzia la classe compilata separatamente
-        KernelBinderClient clientLib;
+        binder.SpawnNode("NodoProduttore", "C:\\Tasks\\DllProduttore.dll");
+        binder.SpawnNode("NodoConsumatore", "C:\\Tasks\\DllConsumatore.dll");
+        binder.ConnectNodes("NodoProduttore", "NodoConsumatore");
 
-        std::cout << "Connessione riuscita! Premere INVIO per richiedere l'esecuzione alla DLL...\n";
+        // Registrazione su un nodo condiviso per testare la saturazione e il rilascio EDF
+        binder.SpawnNode("NodoCondiviso", "C:\\Tasks\\DllTaskCondiviso.dll");
+        binder.RegisterPeriodicTask("NodoCondiviso", "Telemetria_1", 20, 4); // T=20us, C=4us (U=20%)
+        binder.RegisterPeriodicTask("NodoCondiviso", "Filtro_2", 40, 8);     // T=40us, C=8us (U=20%)
+
+        std::cout << "\nInfrastruttura Binder e nodi EDF pronti. Premi INVIO per calcolo...\n";
         std::cin.get();
 
-        uint8_t inputSample = 0x1F;
-        uint8_t responseSample = 0;
+        uint8_t inputVal = 8;
+        uint8_t responseBuffer[256] = {0};
+        ULONG responseLength = sizeof(responseBuffer);
 
-        if (clientLib.SendTask("C:\\Tasks\\MyTask.dll", &inputSample, 1, &responseSample)) {
-            std::cout << "[CLIENT EXECUTABLE] Task completato! Risposta DLL: 0x"
-                      << std::hex << (int)responseSample << std::dec << "\n";
+        binder.SignalNode("NodoProduttore", &inputVal, 1, NULL, NULL);
+
+        if (binder.SignalNode("NodoConsumatore", NULL, 0, responseBuffer, &responseLength)) {
+            std::cout << "\n--------------------------------------------------\n";
+            std::cout << "[CLIENT SUCCESS] Risposta: " << reinterpret_cast<char*>(responseBuffer) << "\n";
+            std::cout << "--------------------------------------------------\n";
         }
 
-    } catch (const std::runtime_error& e) {
+        std::cout << "Premi INVIO per distruggere il Nodo Condiviso e liberare le risorse computazionali EDF...\n";
+        std::cin.get();
+
+        if (binder.DestroyNode("NodoCondiviso")) {
+            std::cout << "[CLIENT] Nodo Condiviso rimosso. Carico CPU rilasciato e core riallocabili.\n";
+        }
+
+    } catch (const std::exception& e) {
         std::cerr << "Errore: " << e.what() << "\n";
-        return 1;
     }
     return 0;
 }

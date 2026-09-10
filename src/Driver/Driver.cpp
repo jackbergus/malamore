@@ -4,10 +4,8 @@
 UNICODE_STRING g_DeviceName = RTL_CONSTANT_STRING(L"\\Device\\KernelBinderBridge");
 UNICODE_STRING g_SymLinkName = RTL_CONSTANT_STRING(L"\\??\\KernelBinderLink");
 PDEVICE_OBJECT g_DeviceObject = NULL;
-
-PVOID g_KernelAddress = NULL;
-PMDL g_Mdl = NULL;
-const ULONG SHARED_SIZE = sizeof(SharedDataBlock);
+PKEVENT g_ServiceManagerEvent = NULL;
+BinderParcel g_SharedParcel;
 
 NTSTATUS DispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp) {
     UNREFERENCED_PARAMETER(DeviceObject);
@@ -22,28 +20,24 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp) {
     NTSTATUS status = STATUS_SUCCESS;
     ULONG_PTR info = 0;
 
-    if (stack->Parameters.DeviceIoControl.IoControlCode == IOCTL_MAP_SHARED_MEMORY) {
-        if (stack->Parameters.DeviceIoControl.OutputBufferLength >= sizeof(PVOID)) {
-            PVOID* userAddressOut = (PVOID*)Irp->AssociatedIrp.SystemBuffer;
-            
-            __try {
-                // Mappa lo stesso blocco di memoria fisica nel processo utente chiamante corrente
-                PVOID userAddress = MmMapLockedPagesSpecifyCache(
-                    g_Mdl, UserMode, MmCached, NULL, FALSE, NormalPagePriority
-                );
-                
-                *userAddressOut = userAddress;
-                info = sizeof(PVOID);
-                KdPrint(("Memoria mappata con successo per il processo ID: %p\n", PsGetCurrentProcessId()));
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-                status = STATUS_NONE_MAPPED;
-            }
-        } else {
-            status = STATUS_BUFFER_TOO_SMALL;
+    switch (stack->Parameters.DeviceIoControl.IoControlCode) {
+        case IOCTL_REGISTER_SERVICE_MANAGER: {
+            HANDLE hEvent = *(HANDLE*)Irp->AssociatedIrp.SystemBuffer;
+            ObReferenceObjectByHandle(hEvent, EVENT_MODIFY_STATE, *ExEventObjectType, UserMode, (PVOID*)&g_ServiceManagerEvent, NULL);
+            break;
         }
-    } else {
-        status = STATUS_INVALID_DEVICE_REQUEST;
+        case IOCTL_BINDER_COMMAND: {
+            RtlCopyMemory(&g_SharedParcel, Irp->AssociatedIrp.SystemBuffer, sizeof(BinderParcel));
+            if (g_ServiceManagerEvent) KeSetEvent(g_ServiceManagerEvent, IO_NO_INCREMENT, FALSE);
+
+            LARGE_INTEGER delay;
+            delay.QuadPart = -10000 * 30; // Finestra di tolleranza di 30ms per lo spawn
+            KeDelayExecutionThread(KernelMode, FALSE, &delay);
+
+            RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, &g_SharedParcel, sizeof(BinderParcel));
+            info = sizeof(BinderParcel);
+            break;
+        }
     }
 
     Irp->IoStatus.Status = status;
@@ -54,15 +48,9 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp) {
 
 VOID DriverUnload(_In_ PDRIVER_OBJECT DriverObject) {
     UNREFERENCED_PARAMETER(DriverObject);
-    if (g_Mdl) {
-        IoFreeMdl(g_Mdl);
-    }
-    if (g_KernelAddress) {
-        ExFreePoolWithTag(g_KernelAddress, 'Bind');
-    }
+    if (g_ServiceManagerEvent) ObDereferenceObject(g_ServiceManagerEvent);
     IoDeleteSymbolicLink(&g_SymLinkName);
     IoDeleteDevice(g_DeviceObject);
-    KdPrint(("Driver Binder scaricato.\n"));
 }
 
 extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath) {
@@ -71,23 +59,6 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
     DriverObject->MajorFunction[IRP_MJ_CREATE] = DispatchCreateClose;
     DriverObject->MajorFunction[IRP_MJ_CLOSE] = DispatchCreateClose;
     DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchIoctl;
-
-    // Alloca memoria permanente a livello hardware
-    // Sostituisci questo:
-    // g_KernelAddress = ExAllocatePool2(POOL_FLAG_NON_PAGED, SHARED_SIZE, 'Bind');
-    // Con questo:
-    g_KernelAddress = ExAllocatePoolWithTag(NonPagedPool, SHARED_SIZE, 'Bind');
-    // g_KernelAddress = ExAllocatePool2(POOL_FLAG_NON_PAGED, SHARED_SIZE, 'Bind');
-    if (!g_KernelAddress) return STATUS_INSUFFICIENT_RESOURCES;
-    RtlZeroMemory(g_KernelAddress, SHARED_SIZE);
-
-    g_Mdl = IoAllocateMdl(g_KernelAddress, SHARED_SIZE, FALSE, FALSE, NULL);
-    if (!g_Mdl) {
-        ExFreePoolWithTag(g_KernelAddress, 'Bind');
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-    MmBuildMdlForNonPagedPool(g_Mdl);
-
     return IoCreateDevice(DriverObject, 0, &g_DeviceName, MY_DEVICE_TYPE, 0, FALSE, &g_DeviceObject)
            || IoCreateSymbolicLink(&g_SymLinkName, &g_DeviceName);
 }

@@ -1,25 +1,33 @@
 # MALAMORE: Windows Kernel Binder (Low-Latency IPC Architecture)
 
-Questa documentazione descrive l'architettura **Windows Kernel Binder**, un pattern di comunicazione inter-processo (IPC) ad altissime prestazioni pensato per aggirare i limiti dello scheduler di Windows e garantire l'esecuzione deterministica di task dinamici da 10ms a basso jitter.
+Questa documentazione descrive l'architettura **Windows Kernel Binder**, un pattern di comunicazione inter-processo (IPC) ad altissime prestazioni pensato per aggirare i limiti dello scheduler di Windows e garantire l'esecuzione deterministica di task dinamici da 10ms a basso jitter distribuibili su N nodi concorrenti con granularità a 10 microsecondi.
 
 ---
 
 ## 1. L'Architettura dei Ruoli
 
-L'architettura suddivide le responsabilità su tre attori principali più un modulo dinamico. Questo è l'unico modo su Windows per unire **sicurezza di esecuzione (DLL)** e **prestazioni hardware (zero jitter)**.
+L'architettura suddivide le responsabilità su tre attori principali più una flotta di moduli dinamici gestiti in modalità Ibrida. Questo è l'unico modo su Windows per unire **sicurezza di esecuzione (DLL)**, **multitasking Earliest Deadline First (EDF)** e **prestazioni hardware (zero jitter)**.
 
-```
-[ Client .exe ]               [ Driver .sys ]               [ Server .exe ]
-(Decide il task) ---------> (Condivide la RAM) ---------> (Priorità Realtime)
-(Sveglia i processi)                                     (Esegue fisicamente la DLL)
+```text
+[ Client .exe ]               [ Driver .sys ]               [ ServiceManager .exe ]
+(Crea la topologia) --------> (Condivide la RAM) ---------> (Orchestratore di CPU)
+(Invia transazioni)           (Bypassa lo scheduler)         (Spawna N Esecutori Realtime)
+                                                                       |
+                                         +-----------------------------+-----------------------------+
+
+                                         |                                                           |
+                           [ KernelServer .exe (Core X) ]                              [ KernelServer .exe (Core Y) ]
+                           (Engine EDF a Polling Attivo)                               (Engine EDF a Polling Attivo)
+                           * Se ha 1 solo Task -> Modo 1:1                             * Se ha 1 solo Task -> Modo 1:1
+                           * Se ha N Task     -> Modo M:N                              * Se ha N Task     -> Modo M:N
 ```
 
 ### Perché serve il Driver?
-Il Driver gestisce la **memoria fisica e la sincronizzazione hardware**. Solo il codice a livello kernel può allocare memoria non-pagabile (`NonPagedPool`), bloccarla nella RAM tramite un descrittore hardware (`MDL`) e mapparla simultaneamente dentro gli spazi di indirizzamento virtuale di due processi isolati. Inoltre, l'attivazione degli eventi nativi a livello kernel scavalca le normali code software dello scheduler Win32, riducendo la latenza di sveglia del Server al minimo assoluto.
+Il Driver gestisce la **memoria fisica e la sincronizzazione hardware**. Solo il codice a livello kernel può allocare memoria non-pagabile (`NonPagedPool`), bloccarla nella RAM tramite un descrittore hardware (`MDL`) e mapparla simultaneamente dentro gli spazi di indirizzamento virtuale di processi isolati. Inoltre, l'attivazione degli eventi nativi a livello kernel scavalca le normali code software dello scheduler Win32, riducendo la latenza di sveglia del ServiceManager al minimo assoluto.
 
 ### Perché serve il Server se c'è già il Driver?
 Il Driver **non può caricare o eseguire le DLL**. Windows impedisce rigorosamente al kernel (Ring 0) di eseguire file `.dll` compilati per la modalità utente. Un tentativo di questo tipo attiverebbe le protezioni hardware della CPU (come il *SMEP - Supervisor Mode Execution Prevention*) causando un crash istantaneo del sistema operativo (**BSOD**).
-Il Server funge da "guscio protetto": risiede in modalità utente (potendo caricare dinamicamente qualsiasi DLL in sicurezza), ma viene configurato nella classe speciale `REALTIME_PRIORITY_CLASS`, spingendo lo scheduler a trattarlo con la priorità massima disponibile sulla CPU.
+Il Server funge da "guscio protetto": risiede in modalità utente (potendo caricare dinamicamente qualsiasi DLL in sicurezza), ma viene configurato nella classe speciale `REALTIME_PRIORITY_CLASS`, spingendo lo scheduler a trattarlo con la priorità massima disponibile sulla CPU. I server possono strutturarsi automaticamente in modalità **Dedicata (1:1)** o **Multiprocesso Condiviso (M:N)** in base al carico assegnatogli dal Teorema di Ammissibilità del ServiceManager, comunicando via canali a oggetti `KernelBufferChannel` a lunghezza variabile.
 
 ### Perché non fare tutto solo tra Client e Server (senza Driver)?
 Se si usassero le normali funzioni di Windows (come `CreateFileMapping` o le Pipe denominate), la memoria condivisa sarebbe soggetta al **Paging**. Se il sistema operativo finisse sotto stress, potrebbe spostare quelle pagine sul disco fisso, introducendo picchi di latenza enormi (jitter). Inoltre, la sincronizzazione standard Win32 tra processi utente è vincolata alle code dello scheduler ordinario, introducendo ritardi microscopici ma fluttuanti e imprevedibili. Il driver stabilizza la RAM a livello hardware ed elimina questi ritardi.
@@ -42,9 +50,9 @@ Se si usassero le normali funzioni di Windows (come `CreateFileMapping` o le Pip
    git submodule add https://github.com Driver/3rdparty/FindWDK
    ```
 3. Configura la Toolchain di CLion:
-    * Vai in `Settings -> Build, Execution, Deployment -> Toolchains`.
-    * Cambia o aggiungi la Toolchain impostandola su **Visual Studio**.
-    * Imposta il campo *Architecture* tassativamente su **`x64`** o **`amd64`**.
+   * Vai in `Settings -> Build, Execution, Deployment -> Toolchains`.
+   * Cambia o aggiungi la Toolchain impostandola su **Visual Studio**.
+   * Imposta il campo *Architecture* tassativamente su **`x64`** o **`amd64`**.
 4. Esegui il **Reload del progetto CMake** in CLion. Il modulo `FindWDK` rileverà automaticamente l'installazione locale del tuo Windows Driver Kit.
 
 ---
@@ -73,20 +81,19 @@ Poiché i driver del kernel interagiscono direttamente con l'hardware protetto d
    ```
    *(Per verificare che sia attivo, puoi usare il comando `sc query KernelBinder`)*.
 
-### Fase 3: Avviare il Server Realtime
-1. Esegui il file `KernelServer.exe`.
-2. **Nota tassativa**: Il server **deve** essere eseguito con privilegi di **Amministratore** (*Esegui come Amministratore*), altrimenti Windows rifiuterà la chiamata a `SetPriorityClass(..., REALTIME_PRIORITY_CLASS)` declassando il processo e invalidando la protezione contro il jitter.
-3. Il server allocherà l'evento e rimarrà in ascolto a consumo zero di CPU.
+### Fase 4: Avviare l'Orchestratore Centrale (ServiceManager)
+1. Esegui il file `KernelServiceManager.exe` con privilegi di **Amministratore** (*Esegui come Amministratore*), altrimenti Windows rifiuterà lo spawning dei processi Worker figli in modalità `REALTIME_PRIORITY_CLASS` e l'applicazione del CPU Pinning esclusivo (con isolamento del Core 0).
+2. Il ServiceManager registrerà la sua coda eventi ed avvierà il controllo analitico del Teorema di Ammissibilità EDF rimandando i pacchetti in caso di saturazione.
 
-### Fase 4: Eseguire il Client ed avviare il Task
-1. Assicurati che nel codice del Client il percorso della DLL (`MyTask.dll`) sia configurato correttamente come percorso assoluto.
+### Fase 5: Eseguire il Client ed avviare il Task
+1. Assicurati che nel codice del Client il percorso delle DLL dei task (`DllProduttore.dll`, `DllConsumatore.dll`, `DllTaskCondiviso.dll`) sia configurato correttamente come percorso assoluto.
 2. Avvia `KernelClient.exe`.
 3. Premi **INVIO** all'interno della console del Client.
-4. **Il Flusso Hardware**: Il Client scrive i parametri nella memoria fisica condivisa non-swappabile protetta dal driver, e setta l'evento. Il kernel intercetta la richiesta e risveglia istantaneamente il Server Realtime bypassando lo scheduler ordinario. Il server, avendo bloccato le proprie pagine RAM tramite `VirtualLock`, esegue il codice della DLL in 10ms esatti senza subire alcun page fault o interruzione software, restituendo il controllo al Client.
+4. **Il Flusso Hardware**: Il Client scrive i parametri ed i vincoli delle CPU nel `BinderParcel`. Il driver intercetta la richiesta, sveglia il ServiceManager che esegue lo spawning/pooling controllando l'utilizzazione dei core ed attiva il ciclo di polling ad altissimo determinismo con **Watchdog Inline a 10 microsecondi**. I moduli si scambiano messaggi a lunghezza variabile ed eseguono i task in base alle scadenze EDF calcolate sui tick hardware (`QueryPerformanceCounter`), azzerando i page-fault grazie alle classi RAII `PinnedMemory` della libreria e restituendo il valore finale al Client. Dismettendo un modulo tramite `DestroyNode`, il ServiceManager calcola il decremento di utilizzo del core interessato, rendendolo nuovamente riallocabile in sicurezza.
 
-### Fase 5: Spegnimento e Pulizia delle Risorse
+### Fase 6: Spegnimento e Pulizia delle Risorse
 Al termine dei test, per arrestare e rimuovere il driver dal sistema operativo in sicurezza senza generare BSOD:
-1. Chiudi le console di Client e Server.
+1. Chiudi le console attive di Client e ServiceManager.
 2. Dal Prompt dei comandi (Amministratore) arresta il servizio:
    ```cmd
    sc stop KernelBinder

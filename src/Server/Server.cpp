@@ -4,7 +4,7 @@
 #include <chrono>
 #include <string>
 #include <intrin.h> // Richiesto per __rdtsc()
-#include <Client/KernelBinderClient.h>
+#include <../../include/Library/KernelBinderClient.h>
 
 // Funzione di utilità per ottenere il timestamp formattato per il log
 std::string GetCurrentTimestamp() {
