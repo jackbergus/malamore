@@ -76,6 +76,8 @@ Poiché i driver del kernel interagiscono direttamente con l'hardware protetto d
 2. Digita il comando per abilitare il caricamento di driver di test non firmati:
    ```cmd
    bcdedit /set nointegritychecks on
+   bcdedit.exe -set loadoptions DISABLE_INTEGRITY_CHECKS
+   bcdedit.exe -set TESTSIGNING ON
    ```
 3. **Riavvia il computer** per rendere effettive le modifiche. Sul desktop in basso a destra comparirà la scritta "Modalità test".
 
