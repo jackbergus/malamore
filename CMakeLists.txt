@@ -19,19 +19,80 @@ set(VER_TWEAK "0")
 # Hash SHA1 del certificato di firma (Test/Self-Signed o Commerciale)
 set(SIGN_THUMBPRINT "7D89486963BA0DE667E29219936312532D9195E8")
 # ==============================================================================
+# CONFIGURAZIONI DEL DRIVER
+# ==============================================================================
+# Lascia VUOTO se vuoi che CMake generi e registri un nuovo certificato di test
+#set(SIGN_THUMBPRINT "")
+
+# Se l'utente non ha fornito un Thumbprint, lo generiamo dinamicamente via PowerShell
+if(NOT SIGN_THUMBPRINT)
+    message(STATUS "Nessun SIGN_THUMBPRINT fornito. Tentativo di generazione certificato di test...")
+
+    # Esegue lo script PowerShell in fase di configurazione per creare/trovare il certificato
+    execute_process(
+            COMMAND powershell.exe -ExecutionPolicy Bypass -Command
+            "$certName = '${MANUFACTURER} Test Root'; \
+             $cert = Get-ChildItem Cert:\\LocalMachine\\My | Where-Object { $_.Subject -like \"*CN=$certName*\" } | Select-Object -First 1; \
+             if (-not $cert) { \
+                 $cert = New-SelfSignedCertificate -Subject \"CN=$certName\" -CertStoreLocation \"Cert:\\LocalMachine\\My\" -Type CodeSigningCert -KeyUsage DigitalSignature -KeyExportPolicy Exportable -KeyLength 2048 -Provider \"Microsoft Enhanced RSA and AES Cryptographic Provider\"; \
+                 $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(\"Root\", \"LocalMachine\"); \
+                 $rootStore.Open(\"ReadWrite\"); \
+                 $rootStore.Add($cert); \
+                 $rootStore.Close(); \
+                 $pubStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(\"TrustedPublisher\", \"LocalMachine\"); \
+                 $pubStore.Open(\"ReadWrite\"); \
+                 $pubStore.Add($cert); \
+                 $pubStore.Close(); \
+                 Write-Host \"GENERATED:$($cert.Thumbprint)\"; \
+             } else { \
+                 Write-Host \"FOUND:$($cert.Thumbprint)\"; \
+             }"
+            OUTPUT_VARIABLE POWERSHELL_OUTPUT
+            ERROR_VARIABLE POWERSHELL_ERROR
+            RESULT_VARIABLE POWERSHELL_RESULT
+    )
+
+    if(POWERSHELL_RESULT EQUAL 0 AND POWERSHELL_OUTPUT MATCHES "(GENERATED|FOUND):([A-FA-f0-9]+)")
+        set(SIGN_THUMBPRINT "${CMAKE_MATCH_2}")
+        message(STATUS "Certificato di test pronto! SHA1 Thumbprint: ${SIGN_THUMBPRINT}")
+    else()
+        message(FATAL_ERROR "Impossibile generare il certificato di test. Assicurati di eseguire CMake/Visual Studio come AMMINISTRATORE. Errore: ${POWERSHELL_ERROR}")
+    endif()
+endif()
+
+# ==============================================================================
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/submodules/findwdk/cmake")
+set(WDK_TARGET_VERSION "Win11" CACHE STRING "Target Windows Version")
 find_package(WDK REQUIRED)
+# Oppure "0x0A00" a seconda di come gestisci la variabile nel tuo script
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(Python_EXECUTABLE ${Python3_EXECUTABLE})
 set(WDK_BIN "${WDK_ROOT}/bin/${WDK_VERSION}")
+set(WDK_NTDDI_VERSION "0x0A00000C" CACHE STRING "NTDDI_VERSION")
 message(STATUS "Python trovato in: ${Python_EXECUTABLE}")
+
+set(EXPORT_DRIVER_NAME "driver_lettura")
+
+wdk_add_driver(driver_lettura
+        KMDF 1.15
+        WINVER ${WDK_WINVER}
+        src/tasks/task_lettura.c     # <--- QUI AGGIUNGI IL TUO FILE C
+        src/tasks/task_lettura.h
+)
 
 # Aggiunta del driver (rimosso EXCLUDE_FROM_ALL per farlo compilare di default)
 wdk_add_driver(${DRIVER_NAME}
         KMDF 1.15
         WINVER ${WDK_WINVER}
         simple_driver.cpp
+        src/threads/thread_core_a.c
+        src/threads/thread_core_b.c
+)
+target_compile_definitions(${DRIVER_NAME} PRIVATE LINK_KERNEL NTDDI_VERSION=0x0A00000C _WIN32_MINNT=0x0A00)
+target_link_libraries(${DRIVER_NAME}
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tasks/task_lettura.lib
 )
 
 # Percorso dello script Python che genera il file .inf

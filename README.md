@@ -83,11 +83,12 @@ Poiché i driver del kernel interagiscono direttamente con l'hardware protetto d
 3. **Riavvia il computer** per rendere effettive le modifiche. Sul desktop in basso a destra comparirà la scritta "Modalità test".
 
 ### Fase 2: Installare e Avviare il Driver (`.sys`)
-1. Genera la build del target `KernelBinder` in CLion per produrre il file `KernelBinder.sys`.
-2. Apri il Prompt dei comandi come **Amministratore** e crea il servizio di Windows associato al driver:
+0. Genera la build del target `KernelBinder` in CLion per produrre il file `KernelBinder.sys`.
+1. Apri il Prompt dei comandi come **Amministratore** e crea il servizio di Windows associato al driver:
    ```cmd
    sc.exe create KernelBinder type= kernel binPath= "C:\Percorso\Al\Tuo\Progetto\cmake-build-debug\Driver\KernelBinder.sys"
    ```
+2. Se hai Windows 11, lo Smart App Control blocca i file sconosciuti. Puoi disattivarlo temporaneamente da Impostazioni > Privacy e sicurezza > Sicurezza di Windows > Controllo delle app e del browser > Impostazioni di Controllo intelligente delle app, impostandolo su Disattivato.
 3. Avvia il driver a livello kernel:
    ```cmd
    sc.exe start KernelBinder
@@ -115,3 +116,56 @@ Al termine dei test, per arrestare e rimuovere il driver dal sistema operativo i
     ```cmd
      cmd sc delete KernelBinder     
    ``` 
+   
+### Certificato
+
+Come primo passo, creare un certificato di sviluppatore valido
+
+```cmd
+# 1. Crea il certificato di test specifico per Driver del Kernel
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MalamoreLocalTestCert" -KeyUsage DigitalSignature -FriendlyName "Malamore Kernel Test Cert"
+
+# 2. Esporta il certificato in un file temporaneo
+Export-Certificate -Cert $cert -FilePath "C:\Windows\Temp\MalamoreTest.cer"
+
+# 3. Importa il certificato nelle Autorità di Certificazione Radice Attendibili della macchina
+Import-Certificate -FilePath "C:\Windows\Temp\MalamoreTest.cer" -CertStoreLocation Cert:\LocalMachine\Root
+
+# 4. Importa il certificato negli Editor Attendibili (Trusted Publishers)
+Import-Certificate -FilePath "C:\Windows\Temp\MalamoreTest.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+```
+
+Per istruire CMake o il terminale a usare esattamente questo certificato attendibile, dobbiamo recuperare la sua impronta digitale. Esegui questo comando:
+
+```cmd
+Get-ChildItem Cert:\LocalMachine\My | Where-Object {$_.Subject -match "MalamoreLocalTestCert"} | Select-Object Subject, Thumbprint
+Get-ChildItem -Path Cert:\LocalMachine\My\A3F2E3B8CD42233C3257CA7F6CF12D111E3CE5C9 | Export-Certificate -FilePath "C:\Windows\Temp\MalamoreFix.cer"
+# Importa il certificato nelle Autorità di Certificazione Radice Attendibili della macchina
+Import-Certificate -FilePath "C:\Windows\Temp\MalamoreFix.cer" -CertStoreLocation Cert:\LocalMachine\Root
+
+# Importa il certificato negli Editor Attendibili (Trusted Publishers) per azzerare i blocchi di sicurezza
+Import-Certificate -FilePath "C:\Windows\Temp\MalamoreFix.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+
+# Crea il certificato direttamente nel magazzino Root Personale della Macchina Locale
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MalamoreDriverCert" -KeyUsage DigitalSignature -FriendlyName "Malamore Driver Cert" -CertStoreLocation Cert:\LocalMachine\My
+
+# Esporta il certificato in un file temporaneo
+Export-Certificate -Cert $cert -FilePath "C:\Windows\Temp\MalamoreDriverCert.cer"
+
+# Importa il certificato nelle Autorità di Certificazione Radice Attendibili (Tassativo per il Kernel)
+Import-Certificate -FilePath "C:\Windows\Temp\MalamoreDriverCert.cer" -CertStoreLocation Cert:\LocalMachine\Root
+
+# Importa il certificato negli Editor Attendibili
+Import-Certificate -FilePath "C:\Windows\Temp\MalamoreDriverCert.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+
+cd "C:\Users\giaco\CLionProjects\malamore\cmake-build-debug-visual-studio\src\Driver\"
+
+& "C:\Program Files (x86)\Windows Kits\10\bin\10.0.28000.0\x64\signtool.exe" sign /sm /s My /n "MalamoreDriverCert" /v /ph /fd SHA256 .\KernelBinder.sys
+
+
+```
+
+Copia la stringa alfanumerica (l'impronta) che compare a schermo. Sarà simile a un codice esadecimale (es: A1B2C3D4E5F6...).
+
+Ora modifichiamo lo stadio finale di compilazione in modo che signtool.exe non usi un flag casuale (/a), ma applichi la firma legata al certificato di cui Windows si fida ciecamente.
+
