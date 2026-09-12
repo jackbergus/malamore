@@ -72,10 +72,13 @@ Poiché operiamo in modalità Polling Attivo con un Watchdog Inline a 10 microse
 Poiché i driver del kernel interagiscono direttamente con l'hardware protetto del sistema operativo, Windows richiede passaggi specifici per autorizzarne l'esecuzione senza firma digitale commerciale.
 
 ### Fase 1: Abilitare la Modalità Test di Windows
+0. Disabilita il Secure Boot da BIOS.
 1. Apri il **Prompt dei comandi (CMD)** o **PowerShell** como **Amministratore**.
 2. Digita il comando per abilitare il caricamento di driver di test non firmati:
    ```cmd
    bcdedit /set nointegritychecks on
+   bcdedit.exe -set loadoptions DISABLE_INTEGRITY_CHECKS
+   bcdedit.exe -set TESTSIGNING ON
    ```
 3. **Riavvia il computer** per rendere effettive le modifiche. Sul desktop in basso a destra comparirà la scritta "Modalità test".
 
