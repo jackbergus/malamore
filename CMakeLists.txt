@@ -87,7 +87,7 @@ wdk_add_driver(${DRIVER_NAME}
         KMDF 1.15
         WINVER ${WDK_WINVER}
         simple_driver.cpp
-        src/malamore/thread_generic_polling.c
+        src/malamore/thread_generic_polling.cpp
         src/malamore/pool_core.c
         src/malamore/service_manager.cpp
         src/malamore/ipc_manager.cpp
