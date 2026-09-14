@@ -17,7 +17,7 @@ set(VER_PATCH "0")
 set(VER_TWEAK "0")
 
 # Hash SHA1 del certificato di firma (Test/Self-Signed o Commerciale)
-set(SIGN_THUMBPRINT "7D89486963BA0DE667E29219936312532D9195E8")
+set(SIGN_THUMBPRINT "B4DDC9FC4975D4029D3EA0C8AF1387D69CEAF5F3")
 # ==============================================================================
 # CONFIGURAZIONI DEL DRIVER
 # ==============================================================================
@@ -31,7 +31,7 @@ if(NOT SIGN_THUMBPRINT)
     # Esegue lo script PowerShell in fase di configurazione per creare/trovare il certificato
     execute_process(
             COMMAND powershell.exe -ExecutionPolicy Bypass -Command
-            "$certName = '${MANUFACTURER} Test Root'; \
+            "$certName = '${MANUFACTURER}'; \
              $cert = Get-ChildItem Cert:\\LocalMachine\\My | Where-Object { $_.Subject -like \"*CN=$certName*\" } | Select-Object -First 1; \
              if (-not $cert) { \
                  $cert = New-SelfSignedCertificate -Subject \"CN=$certName\" -CertStoreLocation \"Cert:\\LocalMachine\\My\" -Type CodeSigningCert -KeyUsage DigitalSignature -KeyExportPolicy Exportable -KeyLength 2048 -Provider \"Microsoft Enhanced RSA and AES Cryptographic Provider\"; \
@@ -78,7 +78,6 @@ wdk_add_driver(driver_lettura
         KMDF 1.15
         WINVER ${WDK_WINVER}
         src/tasks/task_lettura.c     # <--- QUI AGGIUNGI IL TUO FILE C
-        src/tasks/task_lettura.h
 )
 
 # Aggiunta del driver (rimosso EXCLUDE_FROM_ALL per farlo compilare di default)
@@ -90,10 +89,6 @@ wdk_add_driver(${DRIVER_NAME}
         src/threads/thread_core_b.c
 )
 target_compile_definitions(${DRIVER_NAME} PRIVATE LINK_KERNEL NTDDI_VERSION=0x0A00000C _WIN32_MINNT=0x0A00)
-target_link_libraries(${DRIVER_NAME}
-        PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/tasks/task_lettura.lib
-)
 
 # Percorso dello script Python che genera il file .inf
 set(GENERATE_INF_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/generate_inf.py")
@@ -178,8 +173,8 @@ add_custom_command(
 # ------------------------------------------------------------------------------
 add_custom_command(
         OUTPUT "${SIGN_MARKER}"
-        COMMAND signtool.exe sign /debug /ph /fd "sha256" /sha1 "${SIGN_THUMBPRINT}" /v "${DRIVER_NAME}.sys"
-        COMMAND signtool.exe sign /debug /ph /fd "sha256" /sha1 "${SIGN_THUMBPRINT}" /v "${DRIVER_NAME}.cat"
+        COMMAND "${WDK_ROOT}/bin/${WDK_VERSION}/x64/signtool.exe"  sign  /sha1 "${SIGN_THUMBPRINT}"  /fd sha256 /v "${DRIVER_NAME}.sys"
+        COMMAND "${WDK_ROOT}/bin/${WDK_VERSION}/x64/signtool.exe" sign  /sha1 "${SIGN_THUMBPRINT}" /fd sha256 /v "${DRIVER_NAME}.cat"
         COMMAND ${CMAKE_COMMAND} -E touch "${SIGN_MARKER}"
         DEPENDS "${CAT_OUTPUT_FILE}"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"

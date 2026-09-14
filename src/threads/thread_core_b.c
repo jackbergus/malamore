@@ -2,7 +2,6 @@
 // Created by giaco on 12/09/2026.
 //
 #include <malamore.h>
-#include "shared_defs.h"
 
 VOID CoreBPollingRoutine(_In_ PVOID Context) {
     PTHREAD_CONFIG config = (PTHREAD_CONFIG)Context;

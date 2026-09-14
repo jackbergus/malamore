@@ -119,50 +119,23 @@ Al termine dei test, per arrestare e rimuovere il driver dal sistema operativo i
    
 ### Certificato
 
-Come primo passo, creare un certificato di sviluppatore valido
+Come primo passo, creare un certificato di sviluppatore valido. E' possibile utilizzare lo script Generate-DriverCert.ps1 allo scopo. Tuttavia, non in tutti i sistemi l'esecuzione degli script è abilitata e, per tanto, si dovrebbe ricorrere alla esecuzione manuale dei comandi richiesti.
 
-```cmd
-# 1. Crea il certificato di test specifico per Driver del Kernel
-$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MalamoreLocalTestCert" -KeyUsage DigitalSignature -FriendlyName "Malamore Kernel Test Cert"
-
-# 2. Esporta il certificato in un file temporaneo
-Export-Certificate -Cert $cert -FilePath "C:\Windows\Temp\MalamoreTest.cer"
-
-# 3. Importa il certificato nelle Autorità di Certificazione Radice Attendibili della macchina
-Import-Certificate -FilePath "C:\Windows\Temp\MalamoreTest.cer" -CertStoreLocation Cert:\LocalMachine\Root
-
-# 4. Importa il certificato negli Editor Attendibili (Trusted Publishers)
-Import-Certificate -FilePath "C:\Windows\Temp\MalamoreTest.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
-```
 
 Per istruire CMake o il terminale a usare esattamente questo certificato attendibile, dobbiamo recuperare la sua impronta digitale. Esegui questo comando:
 
 ```cmd
-Get-ChildItem Cert:\LocalMachine\My | Where-Object {$_.Subject -match "MalamoreLocalTestCert"} | Select-Object Subject, Thumbprint
-Get-ChildItem -Path Cert:\LocalMachine\My\A3F2E3B8CD42233C3257CA7F6CF12D111E3CE5C9 | Export-Certificate -FilePath "C:\Windows\Temp\MalamoreFix.cer"
-# Importa il certificato nelle Autorità di Certificazione Radice Attendibili della macchina
-Import-Certificate -FilePath "C:\Windows\Temp\MalamoreFix.cer" -CertStoreLocation Cert:\LocalMachine\Root
+# 1. Create the self-signed certificate
+$cert = New-SelfSignedCertificate -DnsName "MyDriverTestCert" -Type CodeSigning -CertStoreLocation Cert:\CurrentUser\My
 
-# Importa il certificato negli Editor Attendibili (Trusted Publishers) per azzerare i blocchi di sicurezza
-Import-Certificate -FilePath "C:\Windows\Temp\MalamoreFix.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+# 2. Securely prompt the user for the PFX password (characters will be hidden as asterisks)
+$securePassword = Read-Host -Prompt "Enter a password to protect the PFX file" -AsSecureString
 
-# Crea il certificato direttamente nel magazzino Root Personale della Macchina Locale
-$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MalamoreDriverCert" -KeyUsage DigitalSignature -FriendlyName "Malamore Driver Cert" -CertStoreLocation Cert:\LocalMachine\My
+# 3. Export to a PFX file using the secure password
+Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath "C:\Certs\driver_cert.pfx" -Password $securePassword
 
-# Esporta il certificato in un file temporaneo
-Export-Certificate -Cert $cert -FilePath "C:\Windows\Temp\MalamoreDriverCert.cer"
-
-# Importa il certificato nelle Autorità di Certificazione Radice Attendibili (Tassativo per il Kernel)
-Import-Certificate -FilePath "C:\Windows\Temp\MalamoreDriverCert.cer" -CertStoreLocation Cert:\LocalMachine\Root
-
-# Importa il certificato negli Editor Attendibili
-Import-Certificate -FilePath "C:\Windows\Temp\MalamoreDriverCert.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
-
-cd "C:\Users\giaco\CLionProjects\malamore\cmake-build-debug-visual-studio\src\Driver\"
-
-& "C:\Program Files (x86)\Windows Kits\10\bin\10.0.28000.0\x64\signtool.exe" sign /sm /s My /n "MalamoreDriverCert" /v /ph /fd SHA256 .\KernelBinder.sys
-
-
+# 4. Output the thumbprint so you can pass it to your offline signtool pipeline
+Write-Host "Certificate Thumbprint for your build pipeline: $($cert.Thumbprint)" -ForegroundColor Green
 ```
 
 Copia la stringa alfanumerica (l'impronta) che compare a schermo. Sarà simile a un codice esadecimale (es: A1B2C3D4E5F6...).
