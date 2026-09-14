@@ -90,8 +90,7 @@ wdk_add_driver(${DRIVER_NAME}
         src/malamore/thread_generic_polling.c
         src/malamore/pool_core.c
         src/malamore/service_manager.cpp
-#        src/threads/thread_core_a.c
-#        src/threads/thread_core_b.c
+        src/malamore/ipc_manager.cpp
 )
 target_compile_definitions(${DRIVER_NAME} PRIVATE LINK_KERNEL NTDDI_VERSION=0x0A00000C _WIN32_MINNT=0x0A00)
 
