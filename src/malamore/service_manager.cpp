@@ -1,0 +1,167 @@
+//
+// Created by Giacomo Bergami on 14/09/2026.
+//
+
+#include <malamore/service_manager.h>
+#include <ntstrsafe.h>
+
+LIST_ENTRY g_ListaServizi;
+ERESOURCE g_ListaLock;
+
+// Cerca il task all'interno della tabella statica pre-caricata
+static PFN_KERNEL_TASK CercaTaskInTabella(PCSTR NomeTask) {
+    for (ULONG i = 0; i < TOTALE_TASK_REGISTRATI; i++) {
+        if (RtlCompareMemory(g_RegistroTaskStatici[i].NomeTask,
+                             NomeTask,
+                             MAX_SERVICE_NAME_LEN) == MAX_SERVICE_NAME_LEN) {
+            return g_RegistroTaskStatici[i].PuntatoreTask;
+        }
+    }
+    return NULL;
+}
+
+extern "C" VOID ScriviRecordSuFileSink(PCONTESTO_SERVIZIO contesto, PLONG datiDaSalvare) {
+    PCODA_CIRCOLARE coda = contesto->CodaFile;
+    LONG attualeHead = coda->Head;
+    LONG prossimaHead = (attualeHead + 1) % CODA_MAX_MESSAGGI;
+    if (prossimaHead != coda->Tail) {
+        coda->Messaggi[attualeHead].SequenceId = attualeHead;
+        RtlCopyMemory(coda->Messaggi[attualeHead].Dati, datiDaSalvare, sizeof(LONG) * PARAM_COUNT);
+        InterlockedExchange(&coda->Head, prossimaHead);
+        KeSetEvent(&contesto->CodaDatiEvent, IO_NO_INCREMENT, FALSE);
+    }
+}
+
+static VOID DiskWriterThreadRoutine(_In_ PVOID Context) {
+    PCONTESTO_SERVIZIO contesto = (PCONTESTO_SERVIZIO)Context;
+    PCODA_CIRCOLARE coda = contesto->CodaFile;
+    IO_STATUS_BLOCK ioStatus;
+
+    while (!contesto->TerminateThreads) {
+        KeWaitForSingleObject(&contesto->CodaDatiEvent, Executive, KernelMode, FALSE, NULL);
+        while (coda->Tail != coda->Head) {
+            LONG attualeTail = coda->Tail;
+            ZwWriteFile(contesto->FileHandle, NULL, NULL, NULL, &ioStatus,
+                        &coda->Messaggi[attualeTail], sizeof(RECORD_FILE), NULL, NULL);
+            InterlockedExchange(&coda->Tail, (attualeTail + 1) % CODA_MAX_MESSAGGI);
+        }
+        KeResetEvent(&contesto->CodaDatiEvent);
+    }
+    PsTerminateSystemThread(STATUS_SUCCESS);
+}
+
+VOID InizializzaManagerServizi(VOID) {
+    InitializeListHead(&g_ListaServizi);
+    ExInitializeResourceLite(&g_ListaLock);
+}
+
+VOID DeinizializzaManagerServizi(VOID) {
+    ExDeleteResourceLite(&g_ListaLock);
+}
+
+NTSTATUS AvviaNuovoServizio(PSERVIZIO_CONFIG_INPUT Input) {
+    NTSTATUS status;
+    ULONG coreA = 0, coreB = 0;
+
+    PFN_KERNEL_TASK taskA = CercaTaskInTabella(Input->NomeTaskA);
+    PFN_KERNEL_TASK taskB = CercaTaskInTabella(Input->NomeTaskB);
+    if (!taskA || !taskB) return STATUS_NOT_FOUND;
+
+    if (!AllocaCoppiaCore(&coreA, &coreB)) return STATUS_INSUFFICIENT_RESOURCES;
+
+    LARGE_INTEGER freq; KeQueryPerformanceCounter(&freq);
+    PCONTESTO_SERVIZIO contesto = (PCONTESTO_SERVIZIO)ExAllocatePoolWithTag(NonPagedPool, sizeof(CONTESTO_SERVIZIO), 'SrvC');
+    if (!contesto) { LiberaCoppiaCore(coreA, coreB); return STATUS_INSUFFICIENT_RESOURCES; }
+    RtlZeroMemory(contesto, sizeof(CONTESTO_SERVIZIO));
+
+    contesto->ServizioId = Input->ServizioId;
+    contesto->AllocazioneCoreA = coreA; contesto->AllocazioneCoreB = coreB;
+    contesto->TaskA = taskA; contesto->TaskB = taskB; contesto->TimerFrequency = freq;
+    KeInitializeSpinLock(&contesto->LockDati);
+
+    contesto->CodaFile = (PCODA_CIRCOLARE)ExAllocatePoolWithTag(NonPagedPool, sizeof(CODA_CIRCOLARE), 'CodF');
+    if (!contesto->CodaFile) { LiberaCoppiaCore(coreA, coreB); ExFreePoolWithTag(contesto, 'SrvC'); return STATUS_INSUFFICIENT_RESOURCES; }
+    RtlZeroMemory(contesto->CodaFile, sizeof(CODA_CIRCOLARE));
+
+    OBJECT_ATTRIBUTES objAttributes; UNICODE_STRING filePath; WCHAR pathBuffer[256];
+    RtlStringCchPrintfW(pathBuffer, 256, L"\\SystemRoot\\Temp\\Servizio_%u.dat", Input->ServizioId);
+    RtlInitUnicodeString(&filePath, pathBuffer);
+    InitializeObjectAttributes(&objAttributes, &filePath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
+    IO_STATUS_BLOCK ioStatus;
+
+    status = ZwCreateFile(&contesto->FileHandle, FILE_APPEND_DATA | SYNCHRONIZE, &objAttributes, &ioStatus, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SUPERSEDE, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
+    if (!NT_SUCCESS(status)) { ExFreePoolWithTag(contesto->CodaFile, 'CodF'); LiberaCoppiaCore(coreA, coreB); ExFreePoolWithTag(contesto, 'SrvC'); return status; }
+
+    KeInitializeEvent(&contesto->CodaDatiEvent, NotificationEvent, FALSE);
+    PsCreateSystemThread(&contesto->DiskWriterThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, DiskWriterThreadRoutine, contesto);
+
+    LONGLONG periodATicks = (LONGLONG)((Input->PeriodoTaskAMs * freq.QuadPart) / 1000);
+    LONGLONG periodBTicks = (LONGLONG)((Input->PeriodoTaskBMs * freq.QuadPart) / 1000);
+    LONGLONG phaseOffsetBTicks = (LONGLONG)((Input->DurataMediaTaskAUs * freq.QuadPart) / 1000000);
+
+    PTHREAD_CONFIG configA = (PTHREAD_CONFIG)ExAllocatePoolWithTag(NonPagedPool, sizeof(THREAD_CONFIG), 'ThCf');
+    if (configA) {
+        RtlZeroMemory(configA, sizeof(THREAD_CONFIG));
+        configA->Affinity.Group = 0; configA->Affinity.Mask = ((KAFFINITY)1 << coreA);
+        configA->PeriodTicks = periodATicks; configA->PhaseOffsetTicks = 0;
+        configA->ContestoServizio = contesto; configA->IsTaskA = TRUE;
+        PsCreateSystemThread(&contesto->ThreadHandleA, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, configA);
+    }
+
+    PTHREAD_CONFIG configB = (PTHREAD_CONFIG)ExAllocatePoolWithTag(NonPagedPool, sizeof(THREAD_CONFIG), 'ThCf');
+    if (configB) {
+        RtlZeroMemory(configB, sizeof(THREAD_CONFIG));
+        configB->Affinity.Group = 0; configB->Affinity.Mask = ((KAFFINITY)1 << coreB);
+        configB->PeriodTicks = periodBTicks; configB->PhaseOffsetTicks = phaseOffsetBTicks;
+        configB->ContestoServizio = contesto; configB->IsTaskB = FALSE; // Fix: IsTaskA = FALSE
+        PsCreateSystemThread(&contesto->ThreadHandleB, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, configB);
+    }
+
+    KeEnterCriticalRegion(); ExAcquireResourceExclusiveLite(&g_ListaLock, TRUE);
+    InsertTailList(&g_ListaServizi, &contesto->Entry);
+    ExReleaseResourceLite(&g_ListaLock); KeLeaveCriticalRegion();
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS AggiornaParametriServizio(ULONG ServizioId, PLONG NuoviParametri) {
+    NTSTATUS status = STATUS_NOT_FOUND;
+    KeEnterCriticalRegion(); ExAcquireResourceSharedLite(&g_ListaLock, TRUE);
+    PLIST_ENTRY entry = g_ListaServizi.Flink;
+    while (entry != &g_ListaServizi) {
+        PCONTESTO_SERVIZIO contesto = CONTAINING_RECORD(entry, CONTESTO_SERVIZIO, Entry);
+        if (contesto->ServizioId == ServizioId) {
+            KIRQL oldIrql;
+            KeAcquireSpinLock(&contesto->LockDati, &oldIrql);
+            RtlCopyMemory(contesto->BufferParametri, NuoviParametri, sizeof(LONG) * PARAM_COUNT);
+            KeReleaseSpinLock(&contesto->LockDati, oldIrql);
+            status = STATUS_SUCCESS; break;
+        }
+        entry = entry->Flink;
+    }
+    ExReleaseResourceLite(&g_ListaLock); KeLeaveCriticalRegion();
+    return status;
+}
+
+NTSTATUS FermaServizio(ULONG ServizioId) {
+    KeEnterCriticalRegion(); ExAcquireResourceExclusiveLite(&g_ListaLock, TRUE);
+    PLIST_ENTRY entry = g_ListaServizi.Flink;
+    while (entry != &g_ListaServizi) {
+        PCONTESTO_SERVIZIO contesto = CONTAINING_RECORD(entry, CONTESTO_SERVIZIO, Entry);
+        if (contesto->ServizioId == ServizioId) {
+            contesto->TerminateThreads = TRUE;
+            KeSetEvent(&contesto->CodaDatiEvent, IO_NO_INCREMENT, FALSE);
+            if (contesto->ThreadHandleA) ZwClose(contesto->ThreadHandleA);
+            if (contesto->ThreadHandleB) ZwClose(contesto->ThreadHandleB);
+            if (contesto->DiskWriterThreadHandle) ZwClose(contesto->DiskWriterThreadHandle);
+            if (contesto->FileHandle) ZwClose(contesto->FileHandle);
+
+            LiberaCoppiaCore(contesto->AllocazioneCoreA, contesto->AllocazioneCoreB);
+            RemoveEntryList(entry);
+            ExFreePoolWithTag(contesto->CodaFile, 'CodF'); ExFreePoolWithTag(contesto, 'SrvC');
+            break;
+        }
+        entry = entry->Flink;
+    }
+    ExReleaseResourceLite(&g_ListaLock); KeLeaveCriticalRegion();
+    return STATUS_SUCCESS;
+}

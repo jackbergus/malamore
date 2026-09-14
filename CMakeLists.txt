@@ -74,6 +74,8 @@ message(STATUS "Python trovato in: ${Python_EXECUTABLE}")
 
 set(EXPORT_DRIVER_NAME "driver_lettura")
 
+add_executable(client_malamore client_malamore.cpp)
+
 wdk_add_driver(driver_lettura
         KMDF 1.15
         WINVER ${WDK_WINVER}
@@ -85,8 +87,11 @@ wdk_add_driver(${DRIVER_NAME}
         KMDF 1.15
         WINVER ${WDK_WINVER}
         simple_driver.cpp
-        src/threads/thread_core_a.c
-        src/threads/thread_core_b.c
+        src/malamore/thread_generic_polling.c
+        src/malamore/pool_core.c
+        src/malamore/service_manager.cpp
+#        src/threads/thread_core_a.c
+#        src/threads/thread_core_b.c
 )
 target_compile_definitions(${DRIVER_NAME} PRIVATE LINK_KERNEL NTDDI_VERSION=0x0A00000C _WIN32_MINNT=0x0A00)
 

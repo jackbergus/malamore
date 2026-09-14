@@ -1,26 +1,34 @@
 //
 // Created by giaco on 12/09/2026.
 //
-#include <tasks/task_lettura.h>
+#include <malamore.h>
+#pragma alloc_text(PAGEWNK, TaskFiltroPinco)
+#pragma alloc_text(PAGEWNK, TaskSinkPallino)
+#pragma alloc_text(PAGEWNK, TaskAnalisiGenerico)
 
-// Specifica esplicitamente al compilatore che questo codice deve stare
-// in una sezione NON paginata (P=Paginata, N=Non Paginata)
-#pragma alloc_text(PAGEWNK, EseguiLetturaPeriferica)
-
-__declspec(dllexport) VOID EseguiLetturaPeriferica(ULONG CoreId) {
-    // Questo codice viene eseguito a HIGH_LEVEL nel contesto dei thread dell'Orchestratore.
-    // Esegui qui il polling hardware puro dei registri della periferica.
-
-    // Esempio:
-    // UCHAR dato = READ_PORT_UCHAR((PUCHAR)0x3F8);
-
+VOID TaskFiltroPinco(ULONG CoreId, PVOID ContextMessage) {
+    PCONTESTO_SERVIZIO contesto = (PCONTESTO_SERVIZIO)ContextMessage;
+    for (int i = 0; i < PARAM_COUNT; i++) {
+        contesto->BufferRisultati[i] = contesto->BufferParametri[i] * 3;
+    }
     UNREFERENCED_PARAMETER(CoreId);
 }
 
-NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath) {
-    UNREFERENCED_PARAMETER(DriverObject);
-    UNREFERENCED_PARAMETER(RegistryPath);
+VOID TaskSinkPallino(ULONG CoreId, PVOID ContextMessage) {
+    PCONTESTO_SERVIZIO contesto = (PCONTESTO_SERVIZIO)ContextMessage;
+    LONG datiElaborati[PARAM_COUNT];
+    for (int i = 0; i < PARAM_COUNT; i++) {
+        datiElaborati[i] = contesto->BufferRisultati[i] + 50;
+    }
+    ScriviRecordSuFileSink(contesto, datiElaborati);
+    UNREFERENCED_PARAMETER(CoreId);
+}
 
-    // Gli export driver puri spesso non fanno nulla nel DriverEntry
-    return STATUS_SUCCESS;
+VOID TaskAnalisiGenerico(ULONG CoreId, PVOID ContextMessage) {
+    PCONTESTO_SERVIZIO contesto = (PCONTESTO_SERVIZIO)ContextMessage;
+    // Un terzo task ipotetico richiamabile dal client
+    for (int i = 0; i < PARAM_COUNT; i++) {
+        contesto->BufferParametri[i] = 0; // Reset
+    }
+    UNREFERENCED_PARAMETER(CoreId);
 }

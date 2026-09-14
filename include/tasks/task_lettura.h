@@ -9,17 +9,20 @@
 
 #include <ntddk.h>
 
+// Prototipi dei task accessibili (Dichiarati in sezione non paginata)
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// __declspec(dllexport) dice al linker di inserire la funzione nella tavola dei simboli del .sys
-__declspec(dllexport) VOID EseguiLetturaPeriferica(ULONG CoreId);
-
+    VOID TaskFiltroPinco(ULONG CoreId, PVOID ContextMessage);
+    VOID TaskSinkPallino(ULONG CoreId, PVOID ContextMessage);
+    VOID TaskAnalisiGenerico(ULONG CoreId, PVOID ContextMessage);
 #ifdef __cplusplus
 }
 #endif
 
-#endif // DRIVER_LETTURA_H
+#endif
+#endif
 
-#endif //MALAMORE_TASK_LETTURA_H
+
+
+

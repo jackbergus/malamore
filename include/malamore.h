@@ -3,67 +3,84 @@
 
 #define POOL_ZERO_DOWN_LEVEL_SUPPORT 1
 #include <ntddk.h>
+#include "malamore/task_registry.h"
+#include "malamore/pool_core.h"
 
-#define TASK_PERIOD_MS         5
-#define ACTIVE_WINDOW_US       2500
-#define MAX_SERVICE_NAME_LEN    32
-#define MAX_TASK_TABLE_ENTRIES  16
-#define MAX_PAYLOAD_SIZE       512
+#define CODA_MAX_MESSAGGI     4096
 
-// Codici di Controllo IOCTL per la comunicazione User-Kernel
 #define FSCTL_DEVICE_TYPE 0x00008000
 #define IOCTL_AVVIA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_FERMA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_INVIA_PARAMETRI  CTL_CODE(FSCTL_DEVICE_TYPE, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define IOCTL_FERMA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Firma universale polimorfica per i task dei driver esterni
-typedef VOID (*PFN_KERNEL_TASK)(ULONG CoreId, PVOID ContextMessage);
+typedef struct _RECORD_FILE {
+    ULONG SequenceId;
+    LONG Dati[PARAM_COUNT];
+} RECORD_FILE, *PRECORD_FILE;
 
-// Voce della Tabella di Lookup
-typedef struct _TASK_MAP_ENTRY {
-    CHAR NomeServizio[MAX_SERVICE_NAME_LEN];
-    PFN_KERNEL_TASK PuntatoreTask;
-} TASK_MAP_ENTRY, *PTASK_MAP_ENTRY;
+typedef struct _CODA_CIRCOLARE {
+    RECORD_FILE Messaggi[CODA_MAX_MESSAGGI];
+    volatile LONG Head;
+    volatile LONG Tail;
+} CODA_CIRCOLARE, *PCODA_CIRCOLARE;
 
-// Struttura di input proveniente dall'User Mode (CreateFile/DeviceIoControl)
+// Input semplificato: l'utente NON sceglie i core
 typedef struct _SERVIZIO_CONFIG_INPUT {
-    ULONG CoreA;
-    ULONG CoreB;
     ULONG ServizioId;
-    CHAR NomeServizio[MAX_SERVICE_NAME_LEN];
-    ULONG PayloadSize;
-    UCHAR Payload[MAX_PAYLOAD_SIZE];
+    CHAR NomeTaskA[MAX_SERVICE_NAME_LEN];
+    ULONG PeriodoTaskAMs;
+    ULONG DurataMediaTaskAUs;
+    CHAR NomeTaskB[MAX_SERVICE_NAME_LEN];
+    ULONG PeriodoTaskBMs;
+    ULONG DurataMediaTaskBUs;
 } SERVIZIO_CONFIG_INPUT, *PSERVIZIO_CONFIG_INPUT;
 
-// Contesto di allocazione dinamica persistente per ogni coppia di thread attiva
+
 typedef struct _CONTESTO_SERVIZIO {
     LIST_ENTRY Entry;
     ULONG ServizioId;
-    CHAR NomeServizio[MAX_SERVICE_NAME_LEN];
-    PFN_KERNEL_TASK TaskDaEseguire;
-    PVOID MessaggioParametrizzazione;
+
+    // Core assegnati dal Driver a runtime
+    ULONG AllocazioneCoreA;
+    ULONG AllocazioneCoreB;
+
+    PFN_KERNEL_TASK TaskA;
+    PFN_KERNEL_TASK TaskB;
+
+    LONG BufferParametri[PARAM_COUNT];
+    LONG BufferRisultati[PARAM_COUNT];
+    KSPIN_LOCK LockDati;
+
+    PCODA_CIRCOLARE CodaFile;
+    HANDLE FileHandle;
+    KEVENT CodaDatiEvent;
+    HANDLE DiskWriterThreadHandle;
+
     BOOLEAN TerminateThreads;
     HANDLE ThreadHandleA;
     HANDLE ThreadHandleB;
     LARGE_INTEGER TimerFrequency;
 } CONTESTO_SERVIZIO, *PCONTESTO_SERVIZIO;
 
-// Struttura passata singolarmente a ciascun thread di polling
 typedef struct _THREAD_CONFIG {
     GROUP_AFFINITY Affinity;
+    LONGLONG PeriodTicks;
     LONGLONG PhaseOffsetTicks;
     PCONTESTO_SERVIZIO ContestoServizio;
+    BOOLEAN IsTaskA;
 } THREAD_CONFIG, *PTHREAD_CONFIG;
 
-// Funzione esportata per permettere la registrazione dei moduli esterni (.sys)
-__declspec(dllexport) NTSTATUS RegistraTaskEsterno(PCSTR NomeServizio, PFN_KERNEL_TASK PuntatoreTask);
+VOID ScriviRecordSuFileSink(PCONTESTO_SERVIZIO contesto, PLONG datiDaSalvare);
+VOID CorePollingRoutineGeneric(_In_ PVOID Context);
 
-// Routine dei Thread di esecuzione
-VOID CoreAPollingRoutine(_In_ PVOID Context);
-VOID CoreBPollingRoutine(_In_ PVOID Context);
+    struct PACKET_PARAMETRI {
+        ULONG ServizioId;
+        LONG Parametri[PARAM_COUNT];
+    };
 
 #ifdef __cplusplus
 }

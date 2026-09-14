@@ -1,0 +1,45 @@
+//
+// Created by Giacomo Bergami on 14/09/2026.
+//
+
+#ifndef TASKS_REGISTRY_H
+#define TASKS_REGISTRY_H
+
+#include <ntddk.h>
+
+#define MAX_SERVICE_NAME_LEN 32
+#define PARAM_COUNT          10
+
+// Firma universale dei Task
+typedef VOID (*PFN_KERNEL_TASK)(ULONG CoreId, PVOID ContextMessage);
+
+// Struttura per mappare la stringa al puntatore a funzione
+typedef struct _STATIC_TASK_ENTRY {
+    CHAR NomeTask[MAX_SERVICE_NAME_LEN];
+    PFN_KERNEL_TASK PuntatoreTask;
+} STATIC_TASK_ENTRY, *PSTATIC_TASK_ENTRY;
+
+// Prototipi dei task accessibili (Dichiarati in sezione non paginata)
+#ifdef __cplusplus
+extern "C" {
+#endif
+    VOID TaskFiltroPinco(ULONG CoreId, PVOID ContextMessage);
+    VOID TaskSinkPallino(ULONG CoreId, PVOID ContextMessage);
+    VOID TaskAnalisiGenerico(ULONG CoreId, PVOID ContextMessage);
+#ifdef __cplusplus
+}
+#endif
+
+// =========================================================================
+// REGISTRO DEIC COMPITI DISPONIBILI A TEMPO DI CARICAMENTO
+// Per aggiungere un nuovo task, basta inserire la coppia {"Nome", Funzione} qui sotto.
+// =========================================================================
+static const STATIC_TASK_ENTRY g_RegistroTaskStatici[] = {
+    { "Task_Pinco",    TaskFiltroPinco },
+    { "Task_Pallino",  TaskSinkPallino },
+    { "Task_Generico", TaskAnalisiGenerico }
+};
+
+#define TOTALE_TASK_REGISTRATI (sizeof(g_RegistroTaskStatici) / sizeof(STATIC_TASK_ENTRY))
+
+#endif // TASKS_REGISTRY_H
