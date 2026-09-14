@@ -3,6 +3,23 @@
 
 typedef void (*PFN_EXECUTE_ROUTINE_IO)(ULONG CoreId, MessageInputMap* inMap, MessageOutputMap* outMap, PVOID CustomContext);
 
+#define LOCAL_TELEMETRY_SIZE 10240 // Buffer locale capiente per singolo Task
+
+struct LocalTelemetryRecord {
+    ULONG64 Timestamp;
+    ULONG64 ExecutionTimeUs;
+    char StatusFlag;
+};
+
+// Coda circolare locale al singolo thread
+struct LocalTelemetryBuffer {
+    volatile LONG ReadIndex;
+    volatile LONG WriteIndex;
+    volatile LONG Count;
+    LocalTelemetryRecord Records[LOCAL_TELEMETRY_SIZE];
+};
+
+
 struct CorePollingContext {
     ULONG64 SynchronizedStartTicks;
     ULONG64 PhaseOffsetTicks;
@@ -19,6 +36,10 @@ struct CorePollingContext {
     PFN_EXECUTE_ROUTINE_IO TaskFunction;
     PVOID CustomContext;
     KAFFINITY AffinityMask;
+
+
+    // Connessione all'infrastruttura di telemetria locale e globale del pool
+    LocalTelemetryBuffer LocalLog;
 };
 
 static __inline LONG KernelAtomicRead(volatile LONG* Target) {

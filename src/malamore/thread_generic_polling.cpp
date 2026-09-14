@@ -40,6 +40,40 @@ static void FlushCoreOutput(InterProcessChannelData* pOutChannel, MessageOutputM
     }
 }
 
+// Scrittura ultrarapida nel buffer privato del thread (Esegue a HIGH_LEVEL)
+static void PushLocalTelemetry(LocalTelemetryBuffer* localLog, ULONG64 elapsedUs, char status) {
+    if (localLog->Count >= LOCAL_TELEMETRY_SIZE) return; // Buffer locale saturo, protezione da overflow
+
+    LONG currentWrite = localLog->WriteIndex;
+    LocalTelemetryRecord* record = &localLog->Records[currentWrite];
+
+    LARGE_INTEGER ticks = KeQueryPerformanceCounter(NULL);
+    record->Timestamp = ticks.QuadPart;
+    record->ExecutionTimeUs = elapsedUs;
+    record->StatusFlag = status;
+
+    InterlockedExchange(&localLog->WriteIndex, (currentWrite + 1) % LOCAL_TELEMETRY_SIZE);
+    InterlockedIncrement(&localLog->Count);
+}
+
+// Evacua i messaggi dal buffer locale a quello globale del Disk Writer (Esegue a DISPATCH_LEVEL invece del puro Yield)
+static void EvacuateLocalTelemetryToGlobal(LocalTelemetryBuffer* localLog, ULONG coreId) {
+    // Se la coda locale è vuota, non c'è nulla da metabolizzare
+    if (localLog->Count == 0) return;
+
+    LONG currentRead = localLog->ReadIndex;
+    LocalTelemetryRecord* record = &localLog->Records[currentRead];
+
+    // Tentativo di push nella coda globale del Disk Writer.
+    // Passiamo i dati memorizzati in precedenza nel nostro archivio capiente.
+    // Nota: Internamente ScriviRecordSuFileSink controllerà se la coda globale ha spazio.
+    ScriviRecordSuFileSink(coreId, record->ExecutionTimeUs, record->StatusFlag);
+
+    // Avanziamo l'indice locale liberando lo slot nel nostro buffer privato
+    InterlockedExchange(&localLog->ReadIndex, (currentRead + 1) % LOCAL_TELEMETRY_SIZE);
+    InterlockedDecrement(&localLog->Count);
+}
+
 /**
  * CORE POLLING ROUTINE GENERIC (RING 0 TANDEM ENGINE - PRE-WHILE BARRIER ALLIGNMENT)
  */
@@ -116,11 +150,20 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
     // =========================================================================
     while (KernelAtomicRead(&config->KeepRunning)) {
 
-        // --- ARCHITETTURA A TANDEM: ATTESA ATTIVA IN DISPATCH_LEVEL FINO AL TICK HARDWARE ---
-        // Avviene esclusivamente se siamo nella nostra finestra temporale di riposo (IsHighPriority == 0)
-        if (KernelAtomicRead(&config->IsHighPriority) == 0) {
+        // =========================================================================
+        // LATO LOW LEVEL DEL TANDEM: EVACUAZIONE TELEMETRIA AL POSTO DI FARE SOLO YIELD
+        // =========================================================================
+        if (KernelAtomicRead(&config->KeepRunning) && KernelAtomicRead(&config->IsHighPriority) == 0) {
             do {
-                YieldProcessor();
+                // MODIFICA RISOLUTIVA: Se ci sono record nel buffer locale, li metabolizza
+                // spingendoli nella telemetria globale, convertendo l'attesa in lavoro utile!
+                if (config->LocalLog.Count > 0) {
+                    EvacuateLocalTelemetryToGlobal(&config->LocalLog, coreId);
+                } else {
+                    // Se ha finito in anticipo e non ha più log, torna a fare il puro YieldProcessor
+                    YieldProcessor();
+                }
+
                 currentTime = KeQueryPerformanceCounter(NULL);
             } while (currentTime.QuadPart < nextPeriodTime.QuadPart &&
                      KernelAtomicRead(&config->KeepRunning) &&
@@ -163,7 +206,11 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
             // =========================================================================
             // Spinge il record nella coda del NonPagedPoolNx senza toccare il file system a HIGH_LEVEL
             char statusFlag = (taskEnd.QuadPart > highLevelTimeoutTicks.QuadPart) ? 'T' : 'O'; // T = Timeout, O = OK
-            ScriviRecordSuFileSink(coreId, elapsedUs, statusFlag);
+
+            // ScriviRecordSuFileSink(coreId, elapsedUs, statusFlag);
+            // STADIO ULTRA-RAPIDO IN HIGH_LEVEL: Scrive solo nel proprio buffer privato locale
+            // Non tocca la coda globale ed evita collisioni cache hardware o stalli
+            PushLocalTelemetry(&config->LocalLog, elapsedUs, statusFlag);
 
             // CONFRONTO INTERO VELOCE DEL TIMEOUT (Zero Jitter, Zero float)
             if (taskEnd.QuadPart > highLevelTimeoutTicks.QuadPart) {
