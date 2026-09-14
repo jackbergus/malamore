@@ -5,6 +5,16 @@
 #include <ntddk.h>
 #include "malamore/task_registry.h"
 
+// Definizione del tipo per i parametri in ingresso dal client
+#pragma pack(push, 1)
+struct ServiceParams {
+    ULONG PeriodUs;
+    ULONG EstimatedWcetUs;
+    KAFFINITY AffinityMask;
+};
+#pragma pack(pop)
+
+
 #define CODA_MAX_MESSAGGI     4096
 
 #define FSCTL_DEVICE_TYPE 0x00008000

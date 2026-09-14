@@ -1,35 +1,45 @@
-//
-// Created by Giacomo Bergami on 14/09/2026.
-//
+#pragma once
+#include "malamore/ipc_manager.h"
+#include "malamore/thread_generic_polling.h"
 
-#ifndef CORE_POOL_H
-#define CORE_POOL_H
+#define MAX_POOL_CORES 32
 
-#include <ntddk.h>
+// Struttura dati dello slot hardware associato a un singolo core logico
+struct CorePoolEntry {
+    ULONG CoreId;
+    KAFFINITY AffinityMask;
+    BOOLEAN IsAllocated;
 
-// Struttura per tracciare lo stato di allocazione di ciascun core
-typedef struct _CORE_ENTRY {
-    ULONG CoreIndex;
-    BOOLEAN InUso;
-} CORE_ENTRY, *PCORE_ENTRY;
+    // Il Tandem cooperativo assegnato a questo specifico Core hardware
+   struct  CorePollingContext* TaskA;
+    struct CorePollingContext* TaskB;
+
+    HANDLE hThreadA;
+    HANDLE hThreadB;
+
+    // Condotti IPC dedicati residenti nel NonPagedPoolNx
+    struct InterProcessChannelData* InChannel;
+    struct InterProcessChannelData* OutChannel;
+};
+
+// L'orchestratore centrale del pool
+struct CorePoolRegistry {
+    struct CorePoolEntry Cores[MAX_POOL_CORES];
+    ULONG TotalConfiguredCores;
+    ULONG ActiveAllocatedCores;
+    ULONG64 SynchronizedStartTicks;
+    volatile LONG IsActive;
+};
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-    // Variabili globali gestite dal modulo dei core
-    extern PCORE_ENTRY g_PoolCore;
-    extern ULONG g_TotaleCoreDisponibili;
-    extern ERESOURCE g_PoolCoreLock;
-
-    // Funzioni pubbliche del modulo
-    VOID InizializzaPoolCore(VOID);
-    VOID DeinizializzaPoolCore(VOID);
-    BOOLEAN AllocaCoppiaCore(PULONG OutCoreA, PULONG OutCoreB);
-    VOID LiberaCoppiaCore(ULONG CoreA, ULONG CoreB);
+    NTSTATUS InitializeCorePool(ULONG PercentageToUse);
+    NTSTATUS AllocateTaskToCore(const struct ServiceParams* params, ULONG sourceNodeId, PFN_EXECUTE_ROUTINE_IO taskFunc, PVOID customContext);
+    NTSTATUS StartAllConfiguredTandems(ULONG64 CurrentTicks, ULONG64 PerfFrequency);
+    VOID StopAndFreeCorePool();
 
 #ifdef __cplusplus
 }
 #endif
-
-#endif // CORE_POOL_H

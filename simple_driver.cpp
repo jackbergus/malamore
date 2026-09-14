@@ -1,5 +1,7 @@
 #include <ntddk.h>
+#include <malamore.h>
 #include "malamore/ipc_manager.h"
+#include "malamore/pool_core.h"
 #include "malamore/thread_generic_polling.h"
 
 #define DEVICE_NAME_WCHAR      L"\\Device\\KernelBinderDevice"
@@ -26,14 +28,6 @@ extern "C" NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_
 extern "C" NTSTATUS DispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp);
 extern "C" NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp);
 
-// Definizione del tipo per i parametri in ingresso dal client
-#pragma pack(push, 1)
-struct ServiceParams {
-    ULONG PeriodUs;
-    ULONG EstimatedWcetUs;
-    KAFFINITY AffinityMask;
-};
-#pragma pack(pop)
 
 void DummyTaskFunction(ULONG CoreId, MessageInputMap* InMap, MessageOutputMap* OutMap, PVOID CustomContext) {
     UNREFERENCED_PARAMETER(CoreId);
@@ -44,7 +38,11 @@ void DummyTaskFunction(ULONG CoreId, MessageInputMap* InMap, MessageOutputMap* O
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath) {
     UNREFERENCED_PARAMETER(RegistryPath);
-    NTSTATUS status = STATUS_SUCCESS;
+    // Inizializza il pool blindando solo il 50% dei core disponibili per non saturare la macchina
+    auto status = InitializeCorePool(50);
+    if (!NT_SUCCESS(status)) return status;
+
+    status = STATUS_SUCCESS;
     PDEVICE_OBJECT deviceObject = nullptr;
     UNICODE_STRING deviceName, symLink;
 
@@ -106,127 +104,120 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ IRP *Irp) {
         // =========================================================================
         // 1. CONFIGURAZIONE DEI PARAMETRI CRITICI DI TEMPORIZZAZIONE
         // =========================================================================
+        // =========================================================================
+        // 1. ACQUISIZIONE PARAMETRI INCREMENTALE (SUPPORTA PIÙ CHIAMATE SUI CORE)
+        // =========================================================================
         case IOCTL_INVIA_PARAMETRI: {
             if (buffer && inLength >= sizeof(ServiceParams)) {
                 ServiceParams* params = (ServiceParams*)buffer;
 
-                if (g_ThreadsSpawned) {
-                    status = STATUS_DEVICE_BUSY; // Impossibile ri-configurare a servizio avviato
-                    break;
+                // Assegniamo il task a un core libero estratto dal pool conservativo
+                status = AllocateTaskToCore(params, 0, DummyTaskFunction, NULL);
+                if (NT_SUCCESS(status)) {
+                    bytesReturned = sizeof(ServiceParams);
                 }
-
-                // ULONG64 periodTicks = static_cast<ULONG64>(params->PeriodUs * ticksPerUs);
-
-                // Configurazione asimmetrica dello sfasamento dei Task
-                g_pTaskAContext->PeriodTicks = periodTicks;
-                g_pTaskAContext->PhaseOffsetTicks = 0; // TaskA in fase zero
-                g_pTaskAContext->MaxWcetUs = params->EstimatedWcetUs;
-                g_pTaskAContext->PerfCounterFrequency = freq.QuadPart; // <--- PASSA LA FREQUENZA INTERA NATIVA
-                g_pTaskAContext->AffinityMask = params->AffinityMask;
-                g_pTaskAContext->TaskFunction = DummyTaskFunction;
-                g_pTaskAContext->IsHighPriority = 1; // TaskA parte in High
-
-                g_pTaskBContext->PeriodTicks = periodTicks;
-                g_pTaskBContext->PhaseOffsetTicks = periodTicks / 2; // Sfasamento rigido T/2 per il tandem
-                g_pTaskBContext->MaxWcetUs = params->EstimatedWcetUs;
-                g_pTaskBContext->PerfCounterFrequency = freq.QuadPart; // <--- PASSA LA FREQUENZA INTERA NATIVA
-                g_pTaskBContext->AffinityMask = params->AffinityMask;
-                g_pTaskBContext->TaskFunction = DummyTaskFunction;
-                g_pTaskBContext->IsHighPriority = 0; // TaskB parte in Low (Attesa attiva)
-
-                KdPrint(("[MALAMORE] Parametri acquisiti. Periodo: %lu us, Core Mask: 0x%p\n", params->PeriodUs, (void*)params->AffinityMask));
-                status = STATUS_SUCCESS;
             } else {
                 status = STATUS_INVALID_PARAMETER;
             }
             break;
         }
 
+
         // =========================================================================
         // 2. CALCOLO DELLA BARRIERA ED INNESCO DEI SYSTEM THREADS
         // =========================================================================
         case IOCTL_AVVIA_SERVIZIO: {
-            if (g_ThreadsSpawned) {
-                status = STATUS_SUCCESS; // Già in esecuzione
-                break;
-            }
-
-            if (g_pTaskAContext->PeriodTicks == 0) {
-                status = STATUS_INVALID_DEVICE_STATE; // Parametri mancanti
-                break;
-            }
-
-            // Calcolo del timestamp hardware coordinato: Tempo Attuale + 1ms (1000 microsecondi)
-            /*Per convertire 1 ms (pari a 1000 microsecondi) in tick hardware senza appoggiarsi ai decimali, la formula intera corretta è:\(\text{Ticks}=\frac{1000\times \text{Frequenza}}{1.000.000}=\frac{\text{Frequenza}}{1000}\)*/
-            // ULONG64 synchronizedStart = currentTicks.QuadPart + static_cast<ULONG64>(ticksPerUs * 1000);
-            // CORREZIONE DEFINITIVA: Calcolo dei tick hardware per 1ms senza l'uso di double
-            // Formula pura a 64-bit intera: Ticks = freq.QuadPart / 1000
-            ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
-
-
-            g_pTaskAContext->SynchronizedStartTicks = synchronizedStart;
-            g_pTaskAContext->KeepRunning = 1;
-
-            g_pTaskBContext->SynchronizedStartTicks = synchronizedStart;
-            g_pTaskBContext->KeepRunning = 1;
-
-            // Spawn simultaneo dei thread di Ring 0
-            status = PsCreateSystemThread(&g_hThreadA, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, g_pTaskAContext);
-            if (!NT_SUCCESS(status)) break;
-
-            status = PsCreateSystemThread(&g_hThreadB, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, g_pTaskBContext);
-            if (!NT_SUCCESS(status)) {
-                InterlockedExchange(&g_pTaskAContext->KeepRunning, 0);
-                break;
-            }
-
-            g_ThreadsSpawned = TRUE;
-            KdPrint(("[MALAMORE] Boot del tandem eseguito. Partenza sincrona agganciata.\n"));
+            // Avvia simultaneamente tutti i core configurati fino ad ora agganciandoli alla timeline
+            status = StartAllConfiguredTandems(currentTicks.QuadPart, freq.QuadPart);
             break;
         }
+        // case IOCTL_AVVIA_SERVIZIO: {
+        //     if (g_ThreadsSpawned) {
+        //         status = STATUS_SUCCESS; // Già in esecuzione
+        //         break;
+        //     }
+        //
+        //     if (g_pTaskAContext->PeriodTicks == 0) {
+        //         status = STATUS_INVALID_DEVICE_STATE; // Parametri mancanti
+        //         break;
+        //     }
+        //
+        //     // Calcolo del timestamp hardware coordinato: Tempo Attuale + 1ms (1000 microsecondi)
+        //     /*Per convertire 1 ms (pari a 1000 microsecondi) in tick hardware senza appoggiarsi ai decimali, la formula intera corretta è:\(\text{Ticks}=\frac{1000\times \text{Frequenza}}{1.000.000}=\frac{\text{Frequenza}}{1000}\)*/
+        //     // ULONG64 synchronizedStart = currentTicks.QuadPart + static_cast<ULONG64>(ticksPerUs * 1000);
+        //     // CORREZIONE DEFINITIVA: Calcolo dei tick hardware per 1ms senza l'uso di double
+        //     // Formula pura a 64-bit intera: Ticks = freq.QuadPart / 1000
+        //     ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
+        //
+        //
+        //     g_pTaskAContext->SynchronizedStartTicks = synchronizedStart;
+        //     g_pTaskAContext->KeepRunning = 1;
+        //
+        //     g_pTaskBContext->SynchronizedStartTicks = synchronizedStart;
+        //     g_pTaskBContext->KeepRunning = 1;
+        //
+        //     // Spawn simultaneo dei thread di Ring 0
+        //     status = PsCreateSystemThread(&g_hThreadA, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, g_pTaskAContext);
+        //     if (!NT_SUCCESS(status)) break;
+        //
+        //     status = PsCreateSystemThread(&g_hThreadB, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, g_pTaskBContext);
+        //     if (!NT_SUCCESS(status)) {
+        //         InterlockedExchange(&g_pTaskAContext->KeepRunning, 0);
+        //         break;
+        //     }
+        //
+        //     g_ThreadsSpawned = TRUE;
+        //     KdPrint(("[MALAMORE] Boot del tandem eseguito. Partenza sincrona agganciata.\n"));
+        //     break;
+        // }
 
         // =========================================================================
         // 3. ARRESTO ATOMICO E SFRATTO DEL POLLING ATTIVO
         // =========================================================================
         case IOCTL_FERMA_SERVIZIO: {
-            if (!g_ThreadsSpawned) {
-                status = STATUS_SUCCESS;
-                break;
-            }
-
-            // Segnale atomico hardware di arresto dei cicli
-            InterlockedExchange(&g_pTaskAContext->KeepRunning, 0);
-            InterlockedExchange(&g_pTaskBContext->KeepRunning, 0);
-
-            // Attesa sincronizzata del rientro a PASSIVE_LEVEL dei thread prima del rilascio
-            if (g_hThreadA) {
-                PVOID threadObj = nullptr;
-                if (NT_SUCCESS(ObReferenceObjectByHandle(g_hThreadA, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObj, NULL))) {
-                    KeWaitForSingleObject(threadObj, Executive, KernelMode, FALSE, NULL);
-                    ObDereferenceObject(threadObj);
-                }
-                ZwClose(g_hThreadA);
-                g_hThreadA = NULL;
-            }
-
-            if (g_hThreadB) {
-                PVOID threadObj = nullptr;
-                if (NT_SUCCESS(ObReferenceObjectByHandle(g_hThreadB, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObj, NULL))) {
-                    KeWaitForSingleObject(threadObj, Executive, KernelMode, FALSE, NULL);
-                    ObDereferenceObject(threadObj);
-                }
-                ZwClose(g_hThreadB);
-                g_hThreadB = NULL;
-            }
-
-            g_ThreadsSpawned = FALSE;
-
-            // Ripristiniamo la memoria a zero per un'eventuale successiva chiamata a IOCTL_INVIA_PARAMETRI
-            g_pTaskAContext->PeriodTicks = 0;
-            g_pTaskBContext->PeriodTicks = 0;
-            KdPrint(("[MALAMORE] Servizio interrotto. Core liberati dal tandem.\n"));
+            StopAndFreeCorePool();
+            status = STATUS_SUCCESS;
             break;
         }
+        // case IOCTL_FERMA_SERVIZIO: {
+        //     if (!g_ThreadsSpawned) {
+        //         status = STATUS_SUCCESS;
+        //         break;
+        //     }
+        //
+        //     // Segnale atomico hardware di arresto dei cicli
+        //     InterlockedExchange(&g_pTaskAContext->KeepRunning, 0);
+        //     InterlockedExchange(&g_pTaskBContext->KeepRunning, 0);
+        //
+        //     // Attesa sincronizzata del rientro a PASSIVE_LEVEL dei thread prima del rilascio
+        //     if (g_hThreadA) {
+        //         PVOID threadObj = nullptr;
+        //         if (NT_SUCCESS(ObReferenceObjectByHandle(g_hThreadA, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObj, NULL))) {
+        //             KeWaitForSingleObject(threadObj, Executive, KernelMode, FALSE, NULL);
+        //             ObDereferenceObject(threadObj);
+        //         }
+        //         ZwClose(g_hThreadA);
+        //         g_hThreadA = NULL;
+        //     }
+        //
+        //     if (g_hThreadB) {
+        //         PVOID threadObj = nullptr;
+        //         if (NT_SUCCESS(ObReferenceObjectByHandle(g_hThreadB, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObj, NULL))) {
+        //             KeWaitForSingleObject(threadObj, Executive, KernelMode, FALSE, NULL);
+        //             ObDereferenceObject(threadObj);
+        //         }
+        //         ZwClose(g_hThreadB);
+        //         g_hThreadB = NULL;
+        //     }
+        //
+        //     g_ThreadsSpawned = FALSE;
+        //
+        //     // Ripristiniamo la memoria a zero per un'eventuale successiva chiamata a IOCTL_INVIA_PARAMETRI
+        //     g_pTaskAContext->PeriodTicks = 0;
+        //     g_pTaskBContext->PeriodTicks = 0;
+        //     KdPrint(("[MALAMORE] Servizio interrotto. Core liberati dal tandem.\n"));
+        //     break;
+        // }
 
         default:
             status = STATUS_INVALID_DEVICE_REQUEST;
