@@ -76,12 +76,6 @@ set(EXPORT_DRIVER_NAME "driver_lettura")
 
 add_executable(client_malamore client_malamore.cpp)
 
-wdk_add_driver(driver_lettura
-        KMDF 1.15
-        WINVER ${WDK_WINVER}
-        src/tasks/task_lettura.c     # <--- QUI AGGIUNGI IL TUO FILE C
-)
-
 # Aggiunta del driver (rimosso EXCLUDE_FROM_ALL per farlo compilare di default)
 wdk_add_driver(${DRIVER_NAME}
         KMDF 1.15
@@ -91,6 +85,7 @@ wdk_add_driver(${DRIVER_NAME}
         src/malamore/pool_core.c
         src/malamore/service_manager.cpp
         src/malamore/ipc_manager.cpp
+        src/tasks/task_lettura.c     # <--- QUI AGGIUNGI IL TUO FILE C
 )
 target_compile_definitions(${DRIVER_NAME} PRIVATE LINK_KERNEL NTDDI_VERSION=0x0A00000C _WIN32_MINNT=0x0A00)
 

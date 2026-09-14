@@ -4,16 +4,15 @@
 typedef void (*PFN_EXECUTE_ROUTINE_IO)(ULONG CoreId, MessageInputMap* inMap, MessageOutputMap* outMap, PVOID CustomContext);
 
 struct CorePollingContext {
+    ULONG64 SynchronizedStartTicks;
     ULONG64 PhaseOffsetTicks;
     ULONG64 PeriodTicks;
     ULONG MaxWcetUs;
-    double TicksPerUs;
+    ULONG64 PerfCounterFrequency;   // <--- NUOVO: Sostituisce il double (freq.QuadPart)
 
-    // Variabili atomiche volatili
-    volatile LONG IsHighPriority; // 1 = HIGH_LEVEL, 0 = DISPATCH_LEVEL / LOWER
-    volatile LONG KeepRunning;    // Condizione del ciclo del System Thread
+    volatile LONG IsHighPriority;
+    volatile LONG KeepRunning;
 
-    // Riferimenti ai Ring Buffer nel NonPagedPoolNx
     InterProcessChannelData* pInChannelData;
     InterProcessChannelData* pOutChannelData;
 
@@ -22,7 +21,6 @@ struct CorePollingContext {
     KAFFINITY AffinityMask;
 };
 
-// Lettura atomica hardware a Ring 0 tramite bitwise OR neutro
 static __inline LONG KernelAtomicRead(volatile LONG* Target) {
     return InterlockedOr(const_cast<LONG*>(Target), 0);
 }

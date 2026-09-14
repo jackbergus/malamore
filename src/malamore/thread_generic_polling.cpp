@@ -1,17 +1,13 @@
 #include "malamore/thread_generic_polling.h"
-#include <intrin.h> // Richiesto tassativamente per gli intrinseci MSVC come _BitScanForward64
+#include <intrin.h> // Richiesto per _BitScanForward64
 
 static void PreloadCoreInput(InterProcessChannelData* pInChannel, MessageInputMap* inMap) {
     if (!pInChannel || !inMap) return;
 
     BinderParcel packet;
-
-    // Estrae continuativamente i messaggi dal Ring Buffer non-pagabile
     while (KernelBufferChannelRead(pInChannel, &packet, sizeof(BinderParcel)) == STATUS_SUCCESS) {
         if (packet.CommandType == CMD_SIGNAL_NODE && packet.DataLength > 0) {
             ULONG senderId = packet.SourceNodeId % MAX_NODES_IN_SYSTEM;
-
-            // Assegnazione nel pool statico di Ring 0 senza vettori dinamici
             inMap->Nodes[senderId].Dimension = packet.DataLength;
             inMap->Nodes[senderId].Buffer = packet.PayloadData;
         }
@@ -37,14 +33,13 @@ static void FlushCoreOutput(InterProcessChannelData* pOutChannel, MessageOutputM
 
         KernelBufferChannelWrite(pOutChannel, &packet, sizeof(BinderParcel));
 
-        // Pulisce lo stadio per il ciclo successivo
         outMap->Nodes[i].Dimension = 0;
         outMap->Nodes[i].Buffer = NULL;
     }
 }
 
 /**
- * CORE POLLING ROUTINE GENERIC (RING 0 TANDEM ENGINE - HIGH/LOW PRIORITY DISPATCHER)
+ * CORE POLLING ROUTINE GENERIC (RING 0 TANDEM ENGINE - PRE-WHILE BARRIER ALLIGNMENT)
  */
 VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
     CorePollingContext* config = (CorePollingContext*)Context;
@@ -53,9 +48,13 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
         return;
     }
 
-    KIRQL oldIrql = PASSIVE_LEVEL;
-    LARGE_INTEGER startTime, currentTime, nextPeriodTime;
-    KAFFINITY previousAffinity;
+    KIRQL passiveIrql = PASSIVE_LEVEL;
+    LARGE_INTEGER currentTime, nextPeriodTime;
+    LARGE_INTEGER highLevelTimeoutTicks;
+    ULONG64 maxWcetTicks; // <--- NUOVO: Budget espresso in Ticks interi hardware
+
+
+    GROUP_AFFINITY targetAffinity, previousAffinity;
     ULONG coreId = 0;
     unsigned long index = 0;
 
@@ -64,82 +63,115 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
 
     RtlZeroMemory(&inputMap, sizeof(MessageInputMap));
     RtlZeroMemory(&outputMap, sizeof(MessageOutputMap));
+    RtlZeroMemory(&targetAffinity, sizeof(GROUP_AFFINITY));
+    RtlZeroMemory(&previousAffinity, sizeof(GROUP_AFFINITY));
 
-    // =========================================================================
-    // CORREZIONE MSVC: CALCOLO DEL CORE ID CON _BITSCANFORWARD64
-    // =========================================================================
     if (_BitScanForward64(&index, config->AffinityMask)) {
         coreId = (ULONG)index;
     }
 
-    // =========================================================================
-    // CORREZIONE WDK API: IMPOSTAZIONE AFFINITÀ CON KESETSYSTEMAFFINITYTHREAD
-    // =========================================================================
-    // Salva la maschera precedente e blinda il thread corrente sulla maschera target
-    previousAffinity = KeSetSystemAffinityThread(config->AffinityMask);
+    targetAffinity.Mask = config->AffinityMask;
+    targetAffinity.Group = 0;
 
-    // Sincronizzazione iniziale basata sul clock hardware nativo del kernel
-    startTime = KeQueryPerformanceCounter(NULL);
-    nextPeriodTime.QuadPart = startTime.QuadPart + config->PhaseOffsetTicks;
+    KeSetSystemGroupAffinityThread(&targetAffinity, &previousAffinity);
+
+    // CALCOLO DEL BUDGET IN TICKS INTERI (Bypassa l'uso dei double)
+    // Formula: Ticks = (Us * Frequenza) / 1.000.000
+    maxWcetTicks = (static_cast<ULONG64>(config->MaxWcetUs) * config->PerfCounterFrequency) / 1000000ULL;
+    nextPeriodTime.QuadPart = config->SynchronizedStartTicks + config->PhaseOffsetTicks;
+
+    // Innalzamento immediato a DISPATCH_LEVEL per avviare la sincronizzazione oraria protetta
+    KeRaiseIrql(DISPATCH_LEVEL, &passiveIrql);
 
     // =========================================================================
-    // LOOP PRINCIPALE IN POLLING ATTIVO (RUNNING A RING 0)
+    // BARRIERA DI SINCRO PRE-WHILE: ATTESA DEL SEMAFORO TEMPORALE COMUNE
+    // =========================================================================
+    // Questo ciclo congela TaskA e TaskB a DISPATCH_LEVEL finché l'orologio hardware
+    // del sistema operativo non tocca esattamente il timestamp stabilito dal chiamante.
+    do {
+        YieldProcessor(); // Cede la pipeline ma blocca l'esecuzione sul core logico
+        currentTime = KeQueryPerformanceCounter(NULL);
+    } while (currentTime.QuadPart < (LONGLONG)config->SynchronizedStartTicks &&
+             KernelAtomicRead(&config->KeepRunning));
+
+    // Se il driver viene arrestato durante la fase di aggancio preliminare, esce pulito
+    if (!KernelAtomicRead(&config->KeepRunning)) {
+        KeLowerIrql(passiveIrql);
+        KeRevertToUserGroupAffinityThread(&previousAffinity);
+        PsTerminateSystemThread(STATUS_SUCCESS);
+        return;
+    }
+
+    // =========================================================================
+    // ANCORAGGIO ALLA PRIMA SCADENZA DI FASE INIZIALE SIMMETRICA
+    // =========================================================================
+    // Ora che siamo al tempo zero esatto del sistema, impostiamo la prima scadenza
+    // periodica nominale includendo l'offset di sfasamento (PhaseOffsetTicks).
+    nextPeriodTime.QuadPart = config->SynchronizedStartTicks + config->PhaseOffsetTicks;
+
+    // =========================================================================
+    // LOOP PRINCIPALE IN POLLING ATTIVO (DISPATCH_LEVEL)
     // =========================================================================
     while (KernelAtomicRead(&config->KeepRunning)) {
 
-        // --- ARCHITETTURA A TANDEM: ATTESA ATTIVA COOPERATIVA VIA YIELD HARDWARE ---
-        do {
-            YieldProcessor(); // Esegue lo stallo controllato della pipeline hardware della CPU
-            currentTime = KeQueryPerformanceCounter(NULL);
-        } while (currentTime.QuadPart < nextPeriodTime.QuadPart &&
-                 KernelAtomicRead(&config->KeepRunning));
+        // --- ARCHITETTURA A TANDEM: ATTESA ATTIVA IN DISPATCH_LEVEL FINO AL TICK HARDWARE ---
+        // Avviene esclusivamente se siamo nella nostra finestra temporale di riposo (IsHighPriority == 0)
+        if (KernelAtomicRead(&config->IsHighPriority) == 0) {
+            do {
+                YieldProcessor();
+                currentTime = KeQueryPerformanceCounter(NULL);
+            } while (currentTime.QuadPart < nextPeriodTime.QuadPart &&
+                     KernelAtomicRead(&config->KeepRunning) &&
+                     KernelAtomicRead(&config->IsHighPriority) == 0);
+        }
 
         if (!KernelAtomicRead(&config->KeepRunning)) break;
 
-        // GESTIONE DELLA PRIORITÀ HIGH/LOW
-        BOOLEAN elevateToHigh = (KernelAtomicRead(&config->IsHighPriority) == 1);
+        // VERIFICA RIGIDA: Eseguiamo le operazioni solo se la timeline ci ha promosso a HIGH
+        if (KernelAtomicRead(&config->IsHighPriority) == 1) {
 
-        if (elevateToHigh) {
-            // FINESTRA DETERMINISTICA ISOLATA A HIGH_LEVEL: Blocca interruzioni e scheduler NT
-            KeRaiseIrql(HIGH_LEVEL, &oldIrql);
-        } else {
-            // Task a bassa priorità: gira a DISPATCH_LEVEL per consentire l'interbiforcazione dei DPC sani
-            KeRaiseIrql(DISPATCH_LEVEL, &oldIrql);
-        }
+            // 1. ISOLAMENTO DETERMINISTICO DEL CORE AD ALTA PRIORITÀ
+            KIRQL tandemIrql = DISPATCH_LEVEL;
+            KeRaiseIrql(HIGH_LEVEL, &tandemIrql); // Sale da DISPATCH_LEVEL a HIGH_LEVEL
 
-        // PRE-CARICAMENTO DELLE CODE DAL NONPAGED POOL (INGRESSO)
-        PreloadCoreInput(config->pInChannelData, &inputMap);
+            // 2. ARMO DEL WATCHDOG SOFTWARE TEMPORIZZATO DI BUDGET MASSIMO (Timeout Assoluto)
+            LARGE_INTEGER taskStart;
+            taskStart = KeQueryPerformanceCounter(NULL);
+            // CONFIGURAZIONE WATCHDOG TEMPORIZZATO (Intero puro a 64 bit)
+            highLevelTimeoutTicks.QuadPart = taskStart.QuadPart + maxWcetTicks;
 
-        LARGE_INTEGER taskStart, taskEnd, freq;
-        taskStart = KeQueryPerformanceCounter(&freq);
 
-        // ESECUZIONE DEL CORPO DEL SERVIZIO SUL CORE CPU ISOLATO
-        if (config->TaskFunction != NULL) {
-            config->TaskFunction(coreId, &inputMap, &outputMap, config->CustomContext);
-        }
+            // 3. PRE-CARICAMENTO DELLE CODE DAL NONPAGED POOL
+            PreloadCoreInput(config->pInChannelData, &inputMap);
 
-        taskEnd = KeQueryPerformanceCounter(NULL);
-
-        // ABBASSAMENTO IMMEDIATO DELL'IRQL PER RIPRISTINARE I FLUSSI DI SISTEMA
-        KeLowerIrql(oldIrql);
-
-        // WATCHDOG INLINE DEL KERNEL CON DEGRADAZIONE DELLA PRIORITÀ (SAFE RECOVERY)
-        ULONG64 elapsedUs = ((taskEnd.QuadPart - taskStart.QuadPart) * 1000000) / freq.QuadPart;
-        if (elapsedUs > config->MaxWcetUs) {
-            // SANZIONE DI RING 0: Se il Task ad alta priorità sgarra il WCET, viene degradato a LOW (DISPATCH_LEVEL)
-            if (KernelAtomicRead(&config->IsHighPriority) == 1) {
-                InterlockedExchange(&config->IsHighPriority, 0); // Spostamento atomico hardware a priorità Bassa
+            // 4. ESECUZIONE DEL CORPO DEL SERVIZIO SUL CORE CPU ISOLATO
+            if (config->TaskFunction != NULL) {
+                config->TaskFunction(coreId, &inputMap, &outputMap, config->CustomContext);
             }
+
+            // 5. GESTIONE AUTOMATICA TIMEOUT: SE SCADE IL TEMPO MASSIMO, PASSA A LOW LEVEL
+            LARGE_INTEGER taskEnd;
+            taskEnd = KeQueryPerformanceCounter(NULL);
+
+            // CONFRONTO INTERO VELOCE DEL TIMEOUT (Zero Jitter, Zero float)
+            if (taskEnd.QuadPart > highLevelTimeoutTicks.QuadPart) {
+                // Sforamento assoluto del tempo massimo in HIGH_LEVEL: commutazione a Low Level
+                InterlockedExchange(&config->IsHighPriority, 0);
+            }
+
+            // 6. ABBASSAMENTO IMMEDIATO A LIVELLO DISPATCH_LEVEL PER LA FASE DI USCITA
+            KeLowerIrql(DISPATCH_LEVEL);
+
+            // 7. STADIO DI FLUSHING IN USCITA (Esegue a DISPATCH_LEVEL)
+            FlushCoreOutput(config->pOutChannelData, &outputMap, coreId);
         }
 
-        // FLUSHING DEI MESSAGGI IN USCITA VERSO I CORES A VALLE (USCITA)
-        FlushCoreOutput(config->pOutChannelData, &outputMap, coreId);
-
-        // Avanzamento rigidamente periodico del tick per mantenere immutata la fase del tandem
+        // Avanzamento rigidamente periodico del tick per mantenere immutata la fase del tandem sincronizzato
         nextPeriodTime.QuadPart += config->PeriodTicks;
     }
 
-    // RIPRISTINO DELL'AFFINITÀ ORIGINALE DEL THREAD PRIMA DELLA TERMINAZIONE
-    KeSetSystemAffinityThread(previousAffinity);
+    // Ripristino finale dell'IRQL nominale del sistema e dell'affinità prima di chiudere il System Thread
+    KeLowerIrql(passiveIrql);
+    KeRevertToUserGroupAffinityThread(&previousAffinity);
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
