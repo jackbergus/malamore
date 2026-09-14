@@ -6,7 +6,10 @@
 /**
  * Registra un nuovo compito sul sistema delegando il core allocation al driver
  */
-void InviaConfigurazioneTask(HANDLE hDevice, ULONG periodoUs, ULONG wcetUs, const char* nomeTask) {
+void InviaConfigurazioneTask(HANDLE hDevice,
+                             ULONG periodoUs,
+                             ULONG wcetUs,
+                             const char* nomeTask) {
     ServiceParams params = { 0 };
     params.PeriodUs = periodoUs;
     params.EstimatedWcetUs = wcetUs;
@@ -39,6 +42,14 @@ void InviaConfigurazioneTask(HANDLE hDevice, ULONG periodoUs, ULONG wcetUs, cons
 }
 
 int main() {
+    /**
+     *Quando scrivi il codice del Client in C++, l'API Win32 nativa di Windows (CreateFileW) si aspetta che tutti i link
+     *ai dispositivi hardware inizino con il prefisso speciale \\.\ (che nei sorgenti C++ va preceduto dai caratteri di
+     *escape, diventando \\\\.\\).Il prefisso \\.\ dice all'API di Windows di saltare lo spazio dei file locali su disco
+     *e di andare a cercare l'alias direttamente all'interno della cartella dei dispositivi globali, che corrisponde
+     *esattamente al percorso \DosDevices\ (o \??\) configurato dal driver in Ring 0.
+     *
+     */
     HANDLE hDevice = CreateFileW(L"\\\\.\\KernelBinderLink", GENERIC_READ | FILE_WRITE_DATA, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hDevice == INVALID_HANDLE_VALUE) {
         std::cout << "Impossibile aprire il link al driver. Assicurati che Malamore.sys sia caricato.\n";

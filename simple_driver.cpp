@@ -4,7 +4,21 @@
 #include "malamore/pool_core.h"
 #include "malamore/thread_generic_polling.h"
 
+/*
+ * Quando il driver invoca l'API IoCreateDevice, registra l'hardware all'interno del sotto-albero protetto \Device\
+ * dell'Object Manager di Windows. Questo nome è visibile esclusivamente ad altri componenti di Ring 0 (altri driver o
+ * moduli del kernel). Un'applicazione utente (Ring 3) che tentasse di chiamare
+ * CreateFileW(L"\\Device\\KernelBinderDevice", ...) riceverebbe un blocco immediato dal sistema operativo, poiché non
+ * ha i privilegi per accedere direttamente a quella directory del kernel.*/
 #define DEVICE_NAME_WCHAR      L"\\Device\\KernelBinderDevice"
+
+/*
+ *Per rendere il dispositivo accessibile anche alle applicazioni ordinarie, il driver deve creare un Link Simbolico
+ *(un collegamento virtuale cross-layer) tramite l'API IoCreateSymbolicLink.Questo comando dice a Windows: "Prendi
+ *l'oggetto interno \Device\KernelBinderDevice e crea un alias visibile all'esterno chiamandolo
+ *\DosDevices\KernelBinderLink". La cartella speciale \DosDevices\ (storicamente legata a MS-DOS per mappare lettere
+ *di unità come C: o porte come COM1) è l'unico punto dell'Object Manager che espone le risorse all'esterno del kernel.
+ **/
 #define SYMBOLIC_LINK_WCHAR    L"\\DosDevices\\KernelBinderLink"
 
 // =========================================================================

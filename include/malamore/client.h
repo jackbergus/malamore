@@ -12,7 +12,6 @@
 struct ServiceParams {
     ULONG PeriodUs;
     ULONG EstimatedWcetUs;
-    // KAFFINITY AffinityMask;
     char TaskName[64]; // <--- NUOVO: Fornito direttamente dall'applicazione utente (Ring 3)
 };
 #pragma pack(pop)
