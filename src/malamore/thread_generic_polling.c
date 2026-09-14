@@ -1,8 +1,4 @@
-//
-// Created by Giacomo Bergami on 14/09/2026.
-//
-
-#include <malamore.h>
+#include "malamore.h"
 
 VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
     PTHREAD_CONFIG config = (PTHREAD_CONFIG)Context;
@@ -20,20 +16,20 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
         do {
             YieldProcessor();
             currentTime = KeQueryPerformanceCounter(NULL);
-        } while (currentTime.QuadPart < nextPeriodTime.QuadPart && !contesto->TerminateThreads);
+        } while (currentTime.QuadPart < nextPeriodTime.QuadPart &&
+                 !contesto->TerminateThreads);
 
         if (contesto->TerminateThreads) break;
 
-        // Finestra di elaborazione deterministica
+        // Finestra deterministica isolata a HIGH_LEVEL
         KeRaiseIrql(HIGH_LEVEL, &oldIrql);
 
         CCHAR bitPosition = RtlFindLeastSignificantBit(config->Affinity.Mask);
         ULONG coreId = (bitPosition != -1) ? (ULONG)bitPosition : 0;
 
-        if (config->IsTaskA && contesto->TaskA != NULL) {
-            contesto->TaskA(coreId, contesto);
-        } else if (!config->IsTaskA && contesto->TaskB != NULL) {
-            contesto->TaskB(coreId, contesto);
+        // Entrambi i core eseguono lo stesso identico codice di task
+        if (contesto->TaskCodice != NULL) {
+            contesto->TaskCodice(coreId, contesto);
         }
 
         KeLowerIrql(oldIrql);

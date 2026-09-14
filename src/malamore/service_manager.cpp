@@ -1,14 +1,10 @@
-//
-// Created by Giacomo Bergami on 14/09/2026.
-//
-
-#include <malamore/service_manager.h>
+#include "malamore/service_manager.h"
+#include "malamore/pool_core.h"
 #include <ntstrsafe.h>
 
 LIST_ENTRY g_ListaServizi;
 ERESOURCE g_ListaLock;
 
-// Cerca il task all'interno della tabella statica pre-caricata
 static PFN_KERNEL_TASK CercaTaskInTabella(PCSTR NomeTask) {
     for (ULONG i = 0; i < TOTALE_TASK_REGISTRATI; i++) {
         if (RtlCompareMemory(g_RegistroTaskStatici[i].NomeTask,
@@ -34,9 +30,7 @@ extern "C" VOID ScriviRecordSuFileSink(PCONTESTO_SERVIZIO contesto, PLONG datiDa
 
 static VOID DiskWriterThreadRoutine(_In_ PVOID Context) {
     PCONTESTO_SERVIZIO contesto = (PCONTESTO_SERVIZIO)Context;
-    PCODA_CIRCOLARE coda = contesto->CodaFile;
-    IO_STATUS_BLOCK ioStatus;
-
+    PCODA_CIRCOLARE coda = contesto->CodaFile; IO_STATUS_BLOCK ioStatus;
     while (!contesto->TerminateThreads) {
         KeWaitForSingleObject(&contesto->CodaDatiEvent, Executive, KernelMode, FALSE, NULL);
         while (coda->Tail != coda->Head) {
@@ -60,12 +54,11 @@ VOID DeinizializzaManagerServizi(VOID) {
 }
 
 NTSTATUS AvviaNuovoServizio(PSERVIZIO_CONFIG_INPUT Input) {
-    NTSTATUS status;
-    ULONG coreA = 0, coreB = 0;
+    NTSTATUS status; ULONG coreA = 0, coreB = 0;
 
-    PFN_KERNEL_TASK taskA = CercaTaskInTabella(Input->NomeTaskA);
-    PFN_KERNEL_TASK taskB = CercaTaskInTabella(Input->NomeTaskB);
-    if (!taskA || !taskB) return STATUS_NOT_FOUND;
+    // Cerca l'unico task richiesto dal client
+    PFN_KERNEL_TASK taskCodice = CercaTaskInTabella(Input->NomeTask);
+    if (!taskCodice) return STATUS_NOT_FOUND;
 
     if (!AllocaCoppiaCore(&coreA, &coreB)) return STATUS_INSUFFICIENT_RESOURCES;
 
@@ -76,7 +69,7 @@ NTSTATUS AvviaNuovoServizio(PSERVIZIO_CONFIG_INPUT Input) {
 
     contesto->ServizioId = Input->ServizioId;
     contesto->AllocazioneCoreA = coreA; contesto->AllocazioneCoreB = coreB;
-    contesto->TaskA = taskA; contesto->TaskB = taskB; contesto->TimerFrequency = freq;
+    contesto->TaskCodice = taskCodice; contesto->TimerFrequency = freq;
     KeInitializeSpinLock(&contesto->LockDati);
 
     contesto->CodaFile = (PCODA_CIRCOLARE)ExAllocatePoolWithTag(NonPagedPool, sizeof(CODA_CIRCOLARE), 'CodF');
@@ -95,25 +88,26 @@ NTSTATUS AvviaNuovoServizio(PSERVIZIO_CONFIG_INPUT Input) {
     KeInitializeEvent(&contesto->CodaDatiEvent, NotificationEvent, FALSE);
     PsCreateSystemThread(&contesto->DiskWriterThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, DiskWriterThreadRoutine, contesto);
 
-    LONGLONG periodATicks = (LONGLONG)((Input->PeriodoTaskAMs * freq.QuadPart) / 1000);
-    LONGLONG periodBTicks = (LONGLONG)((Input->PeriodoTaskBMs * freq.QuadPart) / 1000);
-    LONGLONG phaseOffsetBTicks = (LONGLONG)((Input->DurataMediaTaskAUs * freq.QuadPart) / 1000000);
+    LONGLONG periodTicks = (LONGLONG)((Input->PeriodoTaskMs * freq.QuadPart) / 1000);
+    LONGLONG phaseOffsetBTicks = (LONGLONG)((Input->DurataMediaTaskUs * freq.QuadPart) / 1000000);
 
+    // Duplicazione del singolo Task sul Core A (Offset 0)
     PTHREAD_CONFIG configA = (PTHREAD_CONFIG)ExAllocatePoolWithTag(NonPagedPool, sizeof(THREAD_CONFIG), 'ThCf');
     if (configA) {
         RtlZeroMemory(configA, sizeof(THREAD_CONFIG));
         configA->Affinity.Group = 0; configA->Affinity.Mask = ((KAFFINITY)1 << coreA);
-        configA->PeriodTicks = periodATicks; configA->PhaseOffsetTicks = 0;
-        configA->ContestoServizio = contesto; configA->IsTaskA = TRUE;
+        configA->PeriodTicks = periodTicks; configA->PhaseOffsetTicks = 0;
+        configA->ContestoServizio = contesto;
         PsCreateSystemThread(&contesto->ThreadHandleA, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, configA);
     }
 
+    // Duplicazione dello STESSO Task sul Core B (Offset temporale protettivo)
     PTHREAD_CONFIG configB = (PTHREAD_CONFIG)ExAllocatePoolWithTag(NonPagedPool, sizeof(THREAD_CONFIG), 'ThCf');
     if (configB) {
         RtlZeroMemory(configB, sizeof(THREAD_CONFIG));
         configB->Affinity.Group = 0; configB->Affinity.Mask = ((KAFFINITY)1 << coreB);
-        configB->PeriodTicks = periodBTicks; configB->PhaseOffsetTicks = phaseOffsetBTicks;
-        configB->ContestoServizio = contesto; configB->IsTaskB = FALSE; // Fix: IsTaskA = FALSE
+        configB->PeriodTicks = periodTicks; configB->PhaseOffsetTicks = phaseOffsetBTicks;
+        configB->ContestoServizio = contesto;
         PsCreateSystemThread(&contesto->ThreadHandleB, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, configB);
     }
 

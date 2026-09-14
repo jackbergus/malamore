@@ -4,7 +4,6 @@
 #define POOL_ZERO_DOWN_LEVEL_SUPPORT 1
 #include <ntddk.h>
 #include "malamore/task_registry.h"
-#include "malamore/pool_core.h"
 
 #define CODA_MAX_MESSAGGI     4096
 
@@ -28,28 +27,23 @@ typedef struct _CODA_CIRCOLARE {
     volatile LONG Tail;
 } CODA_CIRCOLARE, *PCODA_CIRCOLARE;
 
-// Input semplificato: l'utente NON sceglie i core
+// Input semplificato: il client richiede un UNICO task per nome
 typedef struct _SERVIZIO_CONFIG_INPUT {
     ULONG ServizioId;
-    CHAR NomeTaskA[MAX_SERVICE_NAME_LEN];
-    ULONG PeriodoTaskAMs;
-    ULONG DurataMediaTaskAUs;
-    CHAR NomeTaskB[MAX_SERVICE_NAME_LEN];
-    ULONG PeriodoTaskBMs;
-    ULONG DurataMediaTaskBUs;
+    CHAR NomeTask[MAX_SERVICE_NAME_LEN];
+    ULONG PeriodoTaskMs;
+    ULONG DurataMediaTaskUs;
 } SERVIZIO_CONFIG_INPUT, *PSERVIZIO_CONFIG_INPUT;
-
 
 typedef struct _CONTESTO_SERVIZIO {
     LIST_ENTRY Entry;
     ULONG ServizioId;
 
-    // Core assegnati dal Driver a runtime
     ULONG AllocazioneCoreA;
     ULONG AllocazioneCoreB;
 
-    PFN_KERNEL_TASK TaskA;
-    PFN_KERNEL_TASK TaskB;
+    // Il singolo task che verrà eseguito in tandem su entrambi i core
+    PFN_KERNEL_TASK TaskCodice;
 
     LONG BufferParametri[PARAM_COUNT];
     LONG BufferRisultati[PARAM_COUNT];
@@ -71,16 +65,10 @@ typedef struct _THREAD_CONFIG {
     LONGLONG PeriodTicks;
     LONGLONG PhaseOffsetTicks;
     PCONTESTO_SERVIZIO ContestoServizio;
-    BOOLEAN IsTaskA;
 } THREAD_CONFIG, *PTHREAD_CONFIG;
 
 VOID ScriviRecordSuFileSink(PCONTESTO_SERVIZIO contesto, PLONG datiDaSalvare);
 VOID CorePollingRoutineGeneric(_In_ PVOID Context);
-
-    struct PACKET_PARAMETRI {
-        ULONG ServizioId;
-        LONG Parametri[PARAM_COUNT];
-    };
 
 #ifdef __cplusplus
 }
