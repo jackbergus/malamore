@@ -1,28 +1,27 @@
-//
-// Created by giaco on 12/09/2026.
-//
+#pragma once
 
-#ifndef MALAMORE_TASK_LETTURA_H
-#define MALAMORE_TASK_LETTURA_H
-#ifndef DRIVER_LETTURA_H
-#define DRIVER_LETTURA_H
-
+#ifdef LINK_KERNEL
 #include <ntddk.h>
+#else
+#include <windows.h>
+#endif
 
-// Prototipi dei task accessibili (Dichiarati in sezione non paginata)
+#include "malamore/ipc_manager.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-    VOID TaskFiltroPinco(ULONG CoreId, PVOID ContextMessage);
-    VOID TaskSinkPallino(ULONG CoreId, PVOID ContextMessage);
-    VOID TaskAnalisiGenerico(ULONG CoreId, PVOID ContextMessage);
+
+    /**
+     * Entry point del task di lettura realtime eseguito dal tandem sul core isolato
+     */
+    VOID TaskLetturaExecute(
+        _In_ ULONG CoreId,
+        _In_ struct MessageInputMap* InMap,
+        _Inout_ struct MessageOutputMap* OutMap,
+        _In_opt_ PVOID CustomContext
+    );
+
 #ifdef __cplusplus
 }
 #endif
-
-#endif
-#endif
-
-
-
-

@@ -5,22 +5,12 @@
 #include <ntddk.h>
 #include "malamore/task_registry.h"
 
-// Definizione del tipo per i parametri in ingresso dal client
-#pragma pack(push, 1)
-struct ServiceParams {
-    ULONG PeriodUs;
-    ULONG EstimatedWcetUs;
-    KAFFINITY AffinityMask;
-};
-#pragma pack(pop)
+
 
 
 #define CODA_MAX_MESSAGGI     4096
 
-#define FSCTL_DEVICE_TYPE 0x00008000
-#define IOCTL_AVVIA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_INVIA_PARAMETRI  CTL_CODE(FSCTL_DEVICE_TYPE, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_FERMA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#include <malamore/shared.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,7 +67,7 @@ typedef struct _THREAD_CONFIG {
     PCONTESTO_SERVIZIO ContestoServizio;
 } THREAD_CONFIG, *PTHREAD_CONFIG;
 
-VOID ScriviRecordSuFileSink(PCONTESTO_SERVIZIO contesto, PLONG datiDaSalvare);
+VOID ScriviRecordSuFileSink(ULONG CoreId, ULONG64 ElapsedUs, char Status);
 VOID CorePollingRoutineGeneric(_In_ PVOID Context);
 
 #ifdef __cplusplus

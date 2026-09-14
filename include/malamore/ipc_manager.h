@@ -23,17 +23,17 @@
 #define STATUS_BINDER_ERROR         -2L
 
 // Struttura dati stile iovec Linux compatibile con il NonPagedPool
-struct MSG {
+struct MSG2 {
     PVOID Buffer;       // Puntatore alla RAM del Pool non-pagabile
     ULONG Dimension;    // Lunghezza effettiva dei byte
 };
 
 struct MessageInputMap {
-    MSG Nodes[MAX_NODES_IN_SYSTEM];
+    struct MSG2 Nodes[MAX_NODES_IN_SYSTEM];
 };
 
 struct MessageOutputMap {
-    MSG Nodes[MAX_NODES_IN_SYSTEM];
+    struct MSG2 Nodes[MAX_NODES_IN_SYSTEM];
 };
 
 #pragma pack(push, 1)
@@ -51,7 +51,7 @@ struct BinderParcel {
     ULONG DataLength;
     LONG ResponseStatus;
     UCHAR PayloadData[MAX_PAYLOAD_SIZE];
-    TaskRealtimeMeta TaskMeta;
+    struct TaskRealtimeMeta TaskMeta;
 };
 
 #define CHANNEL_BUFFER_SIZE 4096
@@ -68,8 +68,8 @@ struct InterProcessChannelData {
 extern "C" {
 #endif
 
-NTSTATUS KernelBufferChannelWrite(InterProcessChannelData* channelData, const void* buffer, ULONG count);
-NTSTATUS KernelBufferChannelRead(InterProcessChannelData* channelData, void* outBuffer, ULONG maxCount);
+NTSTATUS KernelBufferChannelWrite(struct InterProcessChannelData* channelData, const void* buffer, ULONG count);
+NTSTATUS KernelBufferChannelRead(struct InterProcessChannelData* channelData, void* outBuffer, ULONG maxCount);
 
 #ifdef __cplusplus
 }

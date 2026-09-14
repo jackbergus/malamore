@@ -22,6 +22,9 @@ extern "C" {
     NTSTATUS AggiornaParametriServizio(ULONG ServizioId, PLONG NuoviParametri);
     NTSTATUS FermaServizio(ULONG ServizioId);
 
+    // Rintraccia il puntatore alla funzione del kernel in base al nome stringa fornito dal client
+    PFN_EXECUTE_ROUTINE_IO CercaTaskInTabella(const char* taskName);
+
 #ifdef __cplusplus
 }
 #endif

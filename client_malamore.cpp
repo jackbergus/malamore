@@ -1,73 +1,62 @@
 #include <windows.h>
 #include <iostream>
-#include <chrono>
-#include <thread>
 
-#define PARAM_COUNT 10
-#define FSCTL_DEVICE_TYPE 0x00008000
-#define IOCTL_AVVIA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_INVIA_PARAMETRI  CTL_CODE(FSCTL_DEVICE_TYPE, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_FERMA_SERVIZIO   CTL_CODE(FSCTL_DEVICE_TYPE, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#include "malamore/client.h"
 
-struct SERVIZIO_CONFIG_INPUT {
-    ULONG ServizioId;
-    char NomeTask[32];
-    ULONG PeriodoTaskMs;
-    ULONG DurataMediaTaskUs;
-};
+/**
+ * Registra un nuovo compito sul sistema delegando il core allocation al driver
+ */
+void InviaConfigurazioneTask(HANDLE hDevice, ULONG periodoUs, ULONG wcetUs, const char* nomeTask) {
+    ServiceParams params = { 0 };
+    params.PeriodUs = periodoUs;
+    params.EstimatedWcetUs = wcetUs;
 
-struct PACKET_PARAMETRI {
-    ULONG ServizioId;
-    LONG Parametri[PARAM_COUNT];
-};
+    // Scrive il nome della routine bersaglio nel buffer lineare
+    strcpy_s(params.TaskName, 64, nomeTask);
+
+    DWORD bytesReturned = 0;
+
+    // Invia la transazione sincrona di Ring 3
+    BOOL success = DeviceIoControl(
+        hDevice,
+        IOCTL_INVIA_PARAMETRI,
+        &params, sizeof(ServiceParams),
+        &params, sizeof(ServiceParams),
+        &bytesReturned,
+        NULL
+    );
+
+    if (success) {
+        std::cout << "[CLIENT] Vincoli temporali inviati con successo per: " << nomeTask << " (Core allocato automaticamente dal driver)\n";
+    } else {
+        DWORD err = GetLastError();
+        if (err == ERROR_GEN_FAILURE) {
+            std::cout << "[CLIENT 🚨] Saturazione: Il pool hardware del driver non ha core disponibili nella percentuale di sicurezza!\n";
+        } else {
+            std::cout << "[CLIENT 🚨] Errore di comunicazione hardware. Win32 Error: " << err << "\n";
+        }
+    }
+}
 
 int main() {
-    HANDLE hDriver = CreateFileA("\\\\.\\MalamoreOrchestratorLink", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hDriver == INVALID_HANDLE_VALUE) return 1;
-
-    DWORD bytes;
-
-    // --- LANCIO PRIMO TASK IN TANDEM ("Task_Pinco", ID 101) ---
-    SERVIZIO_CONFIG_INPUT config1 = { 101, "Task_Pinco", 5, 500 };
-    if (!DeviceIoControl(hDriver, IOCTL_AVVIA_SERVIZIO, &config1, sizeof(config1), NULL, 0, &bytes, NULL)) {
-        std::cerr << "Risorse insufficienti per il Task 101!" << std::endl;
-    } else {
-        std::cout << "Task_Pinco (101) duplicato con successo su Core A e Core B sfasati." << std::endl;
+    HANDLE hDevice = CreateFileW(L"\\\\.\\KernelBinderLink", GENERIC_READ | FILE_WRITE_DATA, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hDevice == INVALID_HANDLE_VALUE) {
+        std::cout << "Impossibile aprire il link al driver. Assicurati che Malamore.sys sia caricato.\n";
+        return 1;
     }
 
-    // --- LANCIO SECONDO TASK IN PARALLELO ("Task_Pallino", ID 102) ---
-    SERVIZIO_CONFIG_INPUT config2 = { 102, "Task_Pallino", 3, 300 };
-    if (!DeviceIoControl(hDriver, IOCTL_AVVIA_SERVIZIO, &config2, sizeof(config2), NULL, 0, &bytes, NULL)) {
-        std::cerr << "Risorse insufficienti per il Task 102!" << std::endl;
-    } else {
-        std::cout << "Task_Pallino (102) duplicato con successo su una seconda coppia di core." << std::endl;
-    }
+    // Il client si limita a spingere i task in sequenza. Il driver li spalmerà in automatico sui core liberi!
+    InviaConfigurazioneTask(hDevice, 10000, 20, "TaskLettura");
+    InviaConfigurazioneTask(hDevice, 20000, 40, "TaskElaborazione");
 
-    std::cout << "Streaming parametri attivo per 1 minuto..." << std::endl;
-    auto startTime = std::chrono::steady_clock::now();
-    PACKET_PARAMETRI p1 = { 101, {0} };
-    PACKET_PARAMETRI p2 = { 102, {0} };
-    LONG counter = 0;
+    // Innesco simultaneo della timeline sincronizzata su tutti i tandem configurati
+    DWORD bytes = 0;
+    DeviceIoControl(hDevice, IOCTL_AVVIA_SERVIZIO, NULL, 0, NULL, 0, &bytes, NULL);
 
-    while (std::chrono::steady_clock::now() - startTime < std::chrono::minutes(1)) {
-        for (int i = 0; i < PARAM_COUNT; i++) {
-            p1.Parametri[i] = counter + i;
-            p2.Parametri[i] = (counter * 2) + i;
-        }
-        // Alimenta entrambi i task attivi nel kernel
-        DeviceIoControl(hDriver, IOCTL_INVIA_PARAMETRI, &p1, sizeof(p1), NULL, 0, &bytes, NULL);
-        DeviceIoControl(hDriver, IOCTL_INVIA_PARAMETRI, &p2, sizeof(p2), NULL, 0, &bytes, NULL);
+    std::cout << "Tandem attivati. Premi un tasto per fermare i core...\n";
+    std::cin.get();
 
-        counter++;
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
-    }
-
-    // Spegnimento controllato di entrambi i servizi
-    ULONG id1 = 101, id2 = 102;
-    DeviceIoControl(hDriver, IOCTL_FERMA_SERVIZIO, &id1, sizeof(ULONG), NULL, 0, &bytes, NULL);
-    DeviceIoControl(hDriver, IOCTL_FERMA_SERVIZIO, &id2, sizeof(ULONG), NULL, 0, &bytes, NULL);
-
-    CloseHandle(hDriver);
-    std::cout << "Tutti i task terminati e i core liberati." << std::endl;
+    DeviceIoControl(hDevice, IOCTL_FERMA_SERVIZIO, NULL, 0, NULL, 0, &bytes, NULL);
+    CloseHandle(hDevice);
     return 0;
 }

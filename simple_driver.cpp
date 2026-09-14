@@ -10,10 +10,7 @@
 // =========================================================================
 // DEFINIZIONE IOCTL ARCHITETTURALI RIGIDI PER IL RING 0
 // =========================================================================
-#define MY_DEVICE_TYPE 0x8000UL
-#define IOCTL_INVIA_PARAMETRI  CTL_CODE(MY_DEVICE_TYPE, 0x910, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_AVVIA_SERVIZIO   CTL_CODE(MY_DEVICE_TYPE, 0x911, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_FERMA_SERVIZIO   CTL_CODE(MY_DEVICE_TYPE, 0x912, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#include <malamore/client.h>
 
 // Puntatori globali ai contesti allocati nel NonPagedPoolNx
 static CorePollingContext* g_pTaskAContext = nullptr;
@@ -111,10 +108,20 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ IRP *Irp) {
             if (buffer && inLength >= sizeof(ServiceParams)) {
                 ServiceParams* params = (ServiceParams*)buffer;
 
-                // Assegniamo il task a un core libero estratto dal pool conservativo
-                status = AllocateTaskToCore(params, 0, DummyTaskFunction, NULL);
+                // Sicurezza: Garantiamo che la stringa passata dal Ring 3 sia terminata con null
+                // per evitare buffer overflow o letture fuori limite nel dizionario del kernel
+                params->TaskName[63] = '\0';
+                // Convertiamo l'identificatore del compito passato in formato stringa
+                // Supponiamo che il nome sia mappato o inserito all'interno della struttura o estratto da metadati
+                // const char* nomeTaskRichiesto = "TaskLettura"; // Esempio statico o estratto dinamicamente dal buffer parcel
+
+                // Alloca la memoria e aggancia il puntatore reale dal dizionario CercaTaskInTabella
+                status = AllocateTaskToCore(params, params->TaskName, 0, NULL);
                 if (NT_SUCCESS(status)) {
                     bytesReturned = sizeof(ServiceParams);
+                    KdPrint(("[MALAMORE] Configurato con successo il task '%s' sul core dedicato.\n", params->TaskName));
+                } else if (status == STATUS_NOT_FOUND) {
+                    KdPrint(("[MALAMORE 🚨] Errore: Il task '%s' richiesto dal client non esiste nel registro del driver.\n", params->TaskName));
                 }
             } else {
                 status = STATUS_INVALID_PARAMETER;

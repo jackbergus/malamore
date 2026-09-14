@@ -1,8 +1,28 @@
 #pragma once
+#include "client.h"
 #include "malamore/ipc_manager.h"
 #include "malamore/thread_generic_polling.h"
 
 #define MAX_POOL_CORES 32
+#define TELEMETRY_QUEUE_SIZE 128
+
+#pragma pack(push, 1)
+struct TelemetryRecord {
+    ULONG64 Timestamp;
+    ULONG CoreId;
+    ULONG64 ExecutionTimeUs;
+    char StatusFlag;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct TelemetryQueue {
+    volatile LONG ReadIndex;
+    volatile LONG WriteIndex;
+    volatile LONG Count;
+    TelemetryRecord Records[TELEMETRY_QUEUE_SIZE];
+};
+#pragma pack(pop)
 
 // Struttura dati dello slot hardware associato a un singolo core logico
 struct CorePoolEntry {
@@ -29,6 +49,12 @@ struct CorePoolRegistry {
     ULONG ActiveAllocatedCores;
     ULONG64 SynchronizedStartTicks;
     volatile LONG IsActive;
+
+    // Infrastruttura del Disk File Sink asincrono
+    HANDLE hDiskThread;
+    volatile LONG TerminateDiskThread;
+    TelemetryQueue* LogQueue;
+    HANDLE hFileHandle;
 };
 
 #ifdef __cplusplus
@@ -36,7 +62,7 @@ extern "C" {
 #endif
 
     NTSTATUS InitializeCorePool(ULONG PercentageToUse);
-    NTSTATUS AllocateTaskToCore(const struct ServiceParams* params, ULONG sourceNodeId, PFN_EXECUTE_ROUTINE_IO taskFunc, PVOID customContext);
+    NTSTATUS AllocateTaskToCore(const ServiceParams* params, const char* taskName, ULONG sourceNodeId, PVOID customContext);
     NTSTATUS StartAllConfiguredTandems(ULONG64 CurrentTicks, ULONG64 PerfFrequency);
     VOID StopAndFreeCorePool();
 

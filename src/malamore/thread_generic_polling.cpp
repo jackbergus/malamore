@@ -1,6 +1,8 @@
 #include "malamore/thread_generic_polling.h"
 #include <intrin.h> // Richiesto per _BitScanForward64
 
+#include "malamore.h"
+
 static void PreloadCoreInput(InterProcessChannelData* pInChannel, MessageInputMap* inMap) {
     if (!pInChannel || !inMap) return;
 
@@ -152,6 +154,16 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
             // 5. GESTIONE AUTOMATICA TIMEOUT: SE SCADE IL TEMPO MASSIMO, PASSA A LOW LEVEL
             LARGE_INTEGER taskEnd;
             taskEnd = KeQueryPerformanceCounter(NULL);
+
+            // Calcolo esatto del tempo impiegato rimosso dal ciclo double
+            ULONG64 elapsedUs = ((taskEnd.QuadPart - taskStart.QuadPart) * 1000000) / config->PerfCounterFrequency;
+
+            // =========================================================================
+            // RIPRISTINO DEL FILE SINK: LOG ASINCRONO LOCK-FREE DELLA TELEMETRIA
+            // =========================================================================
+            // Spinge il record nella coda del NonPagedPoolNx senza toccare il file system a HIGH_LEVEL
+            char statusFlag = (taskEnd.QuadPart > highLevelTimeoutTicks.QuadPart) ? 'T' : 'O'; // T = Timeout, O = OK
+            ScriviRecordSuFileSink(coreId, elapsedUs, statusFlag);
 
             // CONFRONTO INTERO VELOCE DEL TIMEOUT (Zero Jitter, Zero float)
             if (taskEnd.QuadPart > highLevelTimeoutTicks.QuadPart) {
