@@ -9,10 +9,16 @@
 void InviaConfigurazioneTask(HANDLE hDevice,
                              ULONG periodoUs,
                              ULONG wcetUs,
-                             const char* nomeTask) {
+                             const char* nomeTask,
+                             bool read_operation = true,
+                             bool write_operation = true,
+                             bool save_logging_to_disk_from_queue = true) {
     ServiceParams params = { 0 };
     params.PeriodUs = periodoUs;
     params.EstimatedWcetUs = wcetUs;
+    params.runReadOperation = read_operation ? 1 : 0;
+    params.runWriteOperation = write_operation ? 1 : 0;
+    params.saveFileToDisk = save_logging_to_disk_from_queue ? 1 : 0;
 
     // Scrive il nome della routine bersaglio nel buffer lineare
     strcpy_s(params.TaskName, 64, nomeTask);

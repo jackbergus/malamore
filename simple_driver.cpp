@@ -27,11 +27,11 @@
 #include <malamore/client.h>
 
 // Puntatori globali ai contesti allocati nel NonPagedPoolNx
-static CorePollingContext* g_pTaskAContext = nullptr;
-static CorePollingContext* g_pTaskBContext = nullptr;
-static HANDLE g_hThreadA = NULL;
-static HANDLE g_hThreadB = NULL;
-static BOOLEAN g_ThreadsSpawned = FALSE;
+// static CorePollingContext* g_pTaskAContext = nullptr;
+// static CorePollingContext* g_pTaskBContext = nullptr;
+// static HANDLE g_hThreadA = NULL;
+// static HANDLE g_hThreadB = NULL;
+// static BOOLEAN g_ThreadsSpawned = FALSE;
 
 // Dichiarazione routine driver
 extern "C" DRIVER_UNLOAD DriverUnload;
@@ -40,12 +40,12 @@ extern "C" NTSTATUS DispatchCreateClose(_In_ PDEVICE_OBJECT DeviceObject, _In_ P
 extern "C" NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp);
 
 
-void DummyTaskFunction(ULONG CoreId, MessageInputMap* InMap, MessageOutputMap* OutMap, PVOID CustomContext) {
-    UNREFERENCED_PARAMETER(CoreId);
-    UNREFERENCED_PARAMETER(InMap);
-    UNREFERENCED_PARAMETER(OutMap);
-    UNREFERENCED_PARAMETER(CustomContext);
-}
+// void DummyTaskFunction(ULONG CoreId, MessageInputMap* InMap, MessageOutputMap* OutMap, PVOID CustomContext) {
+//     UNREFERENCED_PARAMETER(CoreId);
+//     UNREFERENCED_PARAMETER(InMap);
+//     UNREFERENCED_PARAMETER(OutMap);
+//     UNREFERENCED_PARAMETER(CustomContext);
+// }
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath) {
     UNREFERENCED_PARAMETER(RegistryPath);
@@ -72,19 +72,6 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
         IoDeleteDevice(deviceObject);
         return status;
     }
-
-    // Allocazione preventiva della RAM non-pagabile per i contesti
-    g_pTaskAContext = (CorePollingContext*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(CorePollingContext), 'TskA');
-    g_pTaskBContext = (CorePollingContext*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(CorePollingContext), 'TskB');
-
-    if (!g_pTaskAContext || !g_pTaskBContext) {
-        IoDeleteSymbolicLink(&symLink);
-        IoDeleteDevice(deviceObject);
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-
-    RtlZeroMemory(g_pTaskAContext, sizeof(CorePollingContext));
-    RtlZeroMemory(g_pTaskBContext, sizeof(CorePollingContext));
 
     KdPrint(("[MALAMORE DRIVER] Caricato. In attesa di parametri di configurazione IPC...\n"));
     return STATUS_SUCCESS;
@@ -114,9 +101,7 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ IRP *Irp) {
 
         // =========================================================================
         // 1. CONFIGURAZIONE DEI PARAMETRI CRITICI DI TEMPORIZZAZIONE
-        // =========================================================================
-        // =========================================================================
-        // 1. ACQUISIZIONE PARAMETRI INCREMENTALE (SUPPORTA PIÙ CHIAMATE SUI CORE)
+        //    ACQUISIZIONE PARAMETRI INCREMENTALE (SUPPORTA PIÙ CHIAMATE SUI CORE)
         // =========================================================================
         case IOCTL_INVIA_PARAMETRI: {
             if (buffer && inLength >= sizeof(ServiceParams)) {
@@ -130,7 +115,7 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ IRP *Irp) {
                 // const char* nomeTaskRichiesto = "TaskLettura"; // Esempio statico o estratto dinamicamente dal buffer parcel
 
                 // Alloca la memoria e aggancia il puntatore reale dal dizionario CercaTaskInTabella
-                status = AllocateTaskToCore(params, params->TaskName, 0, NULL);
+                status = AllocateTaskToCore(params, params->TaskName);
                 if (NT_SUCCESS(status)) {
                     bytesReturned = sizeof(ServiceParams);
                     KdPrint(("[MALAMORE] Configurato con successo il task '%s' sul core dedicato.\n", params->TaskName));
@@ -152,45 +137,6 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ IRP *Irp) {
             status = StartAllConfiguredTandems(currentTicks.QuadPart, freq.QuadPart);
             break;
         }
-        // case IOCTL_AVVIA_SERVIZIO: {
-        //     if (g_ThreadsSpawned) {
-        //         status = STATUS_SUCCESS; // Già in esecuzione
-        //         break;
-        //     }
-        //
-        //     if (g_pTaskAContext->PeriodTicks == 0) {
-        //         status = STATUS_INVALID_DEVICE_STATE; // Parametri mancanti
-        //         break;
-        //     }
-        //
-        //     // Calcolo del timestamp hardware coordinato: Tempo Attuale + 1ms (1000 microsecondi)
-        //     /*Per convertire 1 ms (pari a 1000 microsecondi) in tick hardware senza appoggiarsi ai decimali, la formula intera corretta è:\(\text{Ticks}=\frac{1000\times \text{Frequenza}}{1.000.000}=\frac{\text{Frequenza}}{1000}\)*/
-        //     // ULONG64 synchronizedStart = currentTicks.QuadPart + static_cast<ULONG64>(ticksPerUs * 1000);
-        //     // CORREZIONE DEFINITIVA: Calcolo dei tick hardware per 1ms senza l'uso di double
-        //     // Formula pura a 64-bit intera: Ticks = freq.QuadPart / 1000
-        //     ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
-        //
-        //
-        //     g_pTaskAContext->SynchronizedStartTicks = synchronizedStart;
-        //     g_pTaskAContext->KeepRunning = 1;
-        //
-        //     g_pTaskBContext->SynchronizedStartTicks = synchronizedStart;
-        //     g_pTaskBContext->KeepRunning = 1;
-        //
-        //     // Spawn simultaneo dei thread di Ring 0
-        //     status = PsCreateSystemThread(&g_hThreadA, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, g_pTaskAContext);
-        //     if (!NT_SUCCESS(status)) break;
-        //
-        //     status = PsCreateSystemThread(&g_hThreadB, THREAD_ALL_ACCESS, NULL, NULL, NULL, CorePollingRoutineGeneric, g_pTaskBContext);
-        //     if (!NT_SUCCESS(status)) {
-        //         InterlockedExchange(&g_pTaskAContext->KeepRunning, 0);
-        //         break;
-        //     }
-        //
-        //     g_ThreadsSpawned = TRUE;
-        //     KdPrint(("[MALAMORE] Boot del tandem eseguito. Partenza sincrona agganciata.\n"));
-        //     break;
-        // }
 
         // =========================================================================
         // 3. ARRESTO ATOMICO E SFRATTO DEL POLLING ATTIVO
@@ -200,45 +146,6 @@ NTSTATUS DispatchIoctl(_In_ PDEVICE_OBJECT DeviceObject, _In_ IRP *Irp) {
             status = STATUS_SUCCESS;
             break;
         }
-        // case IOCTL_FERMA_SERVIZIO: {
-        //     if (!g_ThreadsSpawned) {
-        //         status = STATUS_SUCCESS;
-        //         break;
-        //     }
-        //
-        //     // Segnale atomico hardware di arresto dei cicli
-        //     InterlockedExchange(&g_pTaskAContext->KeepRunning, 0);
-        //     InterlockedExchange(&g_pTaskBContext->KeepRunning, 0);
-        //
-        //     // Attesa sincronizzata del rientro a PASSIVE_LEVEL dei thread prima del rilascio
-        //     if (g_hThreadA) {
-        //         PVOID threadObj = nullptr;
-        //         if (NT_SUCCESS(ObReferenceObjectByHandle(g_hThreadA, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObj, NULL))) {
-        //             KeWaitForSingleObject(threadObj, Executive, KernelMode, FALSE, NULL);
-        //             ObDereferenceObject(threadObj);
-        //         }
-        //         ZwClose(g_hThreadA);
-        //         g_hThreadA = NULL;
-        //     }
-        //
-        //     if (g_hThreadB) {
-        //         PVOID threadObj = nullptr;
-        //         if (NT_SUCCESS(ObReferenceObjectByHandle(g_hThreadB, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObj, NULL))) {
-        //             KeWaitForSingleObject(threadObj, Executive, KernelMode, FALSE, NULL);
-        //             ObDereferenceObject(threadObj);
-        //         }
-        //         ZwClose(g_hThreadB);
-        //         g_hThreadB = NULL;
-        //     }
-        //
-        //     g_ThreadsSpawned = FALSE;
-        //
-        //     // Ripristiniamo la memoria a zero per un'eventuale successiva chiamata a IOCTL_INVIA_PARAMETRI
-        //     g_pTaskAContext->PeriodTicks = 0;
-        //     g_pTaskBContext->PeriodTicks = 0;
-        //     KdPrint(("[MALAMORE] Servizio interrotto. Core liberati dal tandem.\n"));
-        //     break;
-        // }
 
         default:
             status = STATUS_INVALID_DEVICE_REQUEST;

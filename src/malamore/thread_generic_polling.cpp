@@ -3,7 +3,8 @@
 
 #include "malamore.h"
 
-static void PreloadCoreInput(InterProcessChannelData* pInChannel, MessageInputMap* inMap) {
+static void PreloadCoreInput(InterProcessChannelData* pInChannel,
+                             MessageMap* inMap) {
     if (!pInChannel || !inMap) return;
 
     BinderParcel packet;
@@ -16,10 +17,13 @@ static void PreloadCoreInput(InterProcessChannelData* pInChannel, MessageInputMa
     }
 }
 
-static void FlushCoreOutput(InterProcessChannelData* pOutChannel, MessageOutputMap* outMap, ULONG sourceNodeId) {
+static void FlushCoreOutput(InterProcessChannelData* pOutChannel,
+                            MessageMap* outMap,
+                            ULONG sourceNodeId) {
     if (!pOutChannel || !outMap) return;
 
     for (ULONG i = 0; i < MAX_NODES_IN_SYSTEM; ++i) {
+        // TODO: across all the messages in the buffer, only deal with the ones being the one for the actual telemetry itself
         if (outMap->Nodes[i].Dimension == 0 || outMap->Nodes[i].Buffer == NULL) continue;
 
         BinderParcel packet;
@@ -84,6 +88,7 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
         return;
     }
 
+
     KIRQL passiveIrql = PASSIVE_LEVEL;
     LARGE_INTEGER currentTime, nextPeriodTime;
     LARGE_INTEGER highLevelTimeoutTicks;
@@ -94,11 +99,14 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
     ULONG coreId = 0;
     unsigned long index = 0;
 
-    MessageInputMap inputMap;
-    MessageOutputMap outputMap;
+    MessageMap inputMap;
+    MessageMap outputMap;
 
-    RtlZeroMemory(&inputMap, sizeof(MessageInputMap));
-    RtlZeroMemory(&outputMap, sizeof(MessageOutputMap));
+    RtlZeroMemory(&inputMap, sizeof(MessageMap));
+    inputMap.Size = 0;
+    RtlZeroMemory(&outputMap, sizeof(MessageMap));
+    outputMap.Size = 0;
+
     RtlZeroMemory(&targetAffinity, sizeof(GROUP_AFFINITY));
     RtlZeroMemory(&previousAffinity, sizeof(GROUP_AFFINITY));
 
@@ -108,7 +116,6 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
 
     targetAffinity.Mask = config->AffinityMask;
     targetAffinity.Group = 0;
-
     KeSetSystemGroupAffinityThread(&targetAffinity, &previousAffinity);
 
     // CALCOLO DEL BUDGET IN TICKS INTERI (Bypassa l'uso dei double)
@@ -157,13 +164,12 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
             do {
                 // MODIFICA RISOLUTIVA: Se ci sono record nel buffer locale, li metabolizza
                 // spingendoli nella telemetria globale, convertendo l'attesa in lavoro utile!
-                if (config->LocalLog.Count > 0) {
-                    EvacuateLocalTelemetryToGlobal(&config->LocalLog, coreId);
+                if ((config->LocalLog.Count > 0) && (config->saveFileToDisk)) {
+                    EvacuateLocalTelemetryToGlobal(&config->LocalLog, coreId); // TODO: Sanitize
                 } else {
                     // Se ha finito in anticipo e non ha più log, torna a fare il puro YieldProcessor
                     YieldProcessor();
                 }
-
                 currentTime = KeQueryPerformanceCounter(NULL);
             } while (currentTime.QuadPart < nextPeriodTime.QuadPart &&
                      KernelAtomicRead(&config->KeepRunning) &&
@@ -185,9 +191,8 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
             // CONFIGURAZIONE WATCHDOG TEMPORIZZATO (Intero puro a 64 bit)
             highLevelTimeoutTicks.QuadPart = taskStart.QuadPart + maxWcetTicks;
 
-
             // 3. PRE-CARICAMENTO DELLE CODE DAL NONPAGED POOL
-            PreloadCoreInput(config->pInChannelData, &inputMap);
+            PreloadCoreInput(config->inChannelSelf, &inputMap);
 
             // 4. ESECUZIONE DEL CORPO DEL SERVIZIO SUL CORE CPU ISOLATO
             if (config->TaskFunction != NULL) {
@@ -222,7 +227,7 @@ VOID CorePollingRoutineGeneric(_In_ PVOID Context) {
             KeLowerIrql(DISPATCH_LEVEL);
 
             // 7. STADIO DI FLUSHING IN USCITA (Esegue a DISPATCH_LEVEL)
-            FlushCoreOutput(config->pOutChannelData, &outputMap, coreId);
+            FlushCoreOutput(config->outChannelSelf, &outputMap, coreId);
         }
 
         // Avanzamento rigidamente periodico del tick per mantenere immutata la fase del tandem sincronizzato

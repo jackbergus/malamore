@@ -7,19 +7,20 @@
 
 #include <ntddk.h>
 
-#include "malamore/ipc_manager.h"
-#include "malamore/thread_generic_polling.h"
+// #include "malamore/ipc_manager.h"
+// #include "malamore/thread_generic_polling.h"
+#include "malamore/threads/thread_shared.h"
 
 #define MAX_SERVICE_NAME_LEN 32
 #define PARAM_COUNT          10
 
 // Firma universale dei Task
-typedef VOID (*PFN_KERNEL_TASK)(ULONG CoreId, PVOID ContextMessage);
+// typedef VOID (*PFN_KERNEL_TASK)(ULONG CoreId, PVOID ContextMessage);
 
 // Struttura per mappare la stringa al puntatore a funzione
 typedef struct _STATIC_TASK_ENTRY {
     CHAR NomeTask[MAX_SERVICE_NAME_LEN];
-    PFN_EXECUTE_ROUTINE_IO FunctionPointer;
+    PFN_EXECUTE_ROUTINE_IO FunctionPointer; // TODO: uniform this type
     // PFN_KERNEL_TASK PuntatoreTask;
 } STATIC_TASK_ENTRY, *PSTATIC_TASK_ENTRY;
 
@@ -30,7 +31,7 @@ extern "C" {
     // VOID TaskFiltroPinco(ULONG CoreId, PVOID ContextMessage);
     // VOID TaskSinkPallino(ULONG CoreId, PVOID ContextMessage);
     // VOID TaskAnalisiGenerico(ULONG CoreId, PVOID ContextMessage);
-    VOID TaskLetturaExecute(ULONG CoreId, MessageInputMap* InMap, MessageOutputMap* OutMap, PVOID CustomContext);
+    VOID TaskLetturaExecute(ULONG CoreId, MessageMap* InMap, MessageMap* OutMap, PVOID CustomContext);
 #ifdef __cplusplus
 }
 #endif

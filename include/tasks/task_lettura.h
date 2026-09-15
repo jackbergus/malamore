@@ -6,7 +6,8 @@
 #include <windows.h>
 #endif
 
-#include "malamore/ipc_manager.h"
+#include <malamore/threads/thread_shared.h>
+// #include "malamore/ipc_manager.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,8 +18,8 @@ extern "C" {
      */
     VOID TaskLetturaExecute(
         _In_ ULONG CoreId,
-        _In_ struct MessageInputMap* InMap,
-        _Inout_ struct MessageOutputMap* OutMap,
+        _In_ struct MessageMap* InMap,
+        _Inout_ struct MessageMap* OutMap,
         _In_opt_ PVOID CustomContext
     );
 

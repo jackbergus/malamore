@@ -10,6 +10,9 @@
 #include "ipc_manager.h"
 
 struct ServiceParams {
+    BOOLEAN runReadOperation;
+    BOOLEAN runWriteOperation;
+    BOOLEAN saveFileToDisk;
     ULONG PeriodUs;
     ULONG EstimatedWcetUs;
     char TaskName[64]; // <--- NUOVO: Fornito direttamente dall'applicazione utente (Ring 3)

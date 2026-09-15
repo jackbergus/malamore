@@ -1,7 +1,9 @@
 #include "malamore/ipc_manager.h"
 #include <ntstatus.h>
 
-NTSTATUS KernelBufferChannelWrite(struct InterProcessChannelData* channelData, const void* buffer, ULONG count) {
+NTSTATUS KernelBufferChannelWrite(struct InterProcessChannelData* channelData,
+                                  const void* buffer,
+                                  ULONG count) {
     if (!channelData || count > 256) return STATUS_INVALID_PARAMETER;
 
     // Controllo atomico dello spazio nel Pool Real-time
@@ -19,7 +21,9 @@ NTSTATUS KernelBufferChannelWrite(struct InterProcessChannelData* channelData, c
     return STATUS_SUCCESS;
 }
 
-NTSTATUS KernelBufferChannelRead(struct InterProcessChannelData* channelData, void* outBuffer, ULONG maxCount) {
+NTSTATUS KernelBufferChannelRead(struct InterProcessChannelData* channelData,
+                                void* outBuffer,
+                                ULONG maxCount) {
     if (!channelData || channelData->MessageCount == 0) return STATUS_NO_DATA_DETECTED;
 
     LONG currentRead = channelData->ReadIndex;
