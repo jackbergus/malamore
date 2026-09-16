@@ -53,7 +53,7 @@ public:
     const WCHAR* ToKernelPath(WCHAR* outBuffer, ULONG maxCch) const;
     const WCHAR* ToWin32Path(WCHAR* outBuffer, ULONG maxCch) const;
 
-    const WCHAR* FillBufferWithPath(WCHAR* outBuffer, ULONG maxCch) {
+    const WCHAR* ToPath(WCHAR* outBuffer, ULONG maxCch) const {
 #ifdef LINK_KERNEL
         return ToKernelPath(outBuffer, maxCch);
 #else

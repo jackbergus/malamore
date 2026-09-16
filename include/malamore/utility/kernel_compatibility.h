@@ -61,29 +61,64 @@
 #define FALSE (0)
 #endif
 
-#ifndef STATUS_SUCCESS
-    #define STATUS_SUCCESS               ((NTSTATUS)0x00000000L)
-#endif
+// ALLINEAMENTO COMPLETO DEI CODICI SIMBOLICI NTSTATUS DI RIFERIMENTO
+    #ifndef STATUS_SUCCESS
+        #define STATUS_SUCCESS                  ((NTSTATUS)0x00000000L)
+    #endif
+    #ifndef STATUS_PENDING
+        #define STATUS_PENDING                  ((NTSTATUS)0x00000103L)
+    #endif
+    #ifndef STATUS_TIMEOUT
+        #define STATUS_TIMEOUT                  ((NTSTATUS)0x00000102L)
+    #endif
+    #ifndef STATUS_UNSUCCESSFUL
+        #define STATUS_UNSUCCESSFUL             ((NTSTATUS)0xC0000001L)
+    #endif
+    #ifndef STATUS_INVALID_PARAMETER
+        #define STATUS_INVALID_PARAMETER        ((NTSTATUS)0xC000000DL)
+    #endif
+    #ifndef STATUS_INSUFFICIENT_RESOURCES
+        #define STATUS_INSUFFICIENT_RESOURCES   ((NTSTATUS)0xC000009AL)
+    #endif
+    #ifndef STATUS_INVALID_DEVICE_STATE
+        #define STATUS_INVALID_DEVICE_STATE     ((NTSTATUS)0xC0000184L)
+    #endif
 
-#ifndef STATUS_UNSUCCESSFUL
-    #define STATUS_UNSUCCESSFUL          ((NTSTATUS)0xC0000001L)
-#endif
+    // NUOVI CODICI AGGIUNTI PER COERENZA DIAGNOSTICA CROSS-LAYER
+    #ifndef STATUS_ACCESS_VIOLATION
+        #define STATUS_ACCESS_VIOLATION         ((NTSTATUS)0xC0000005L)
+    #endif
+    #ifndef STATUS_ACCESS_DENIED
+        #define STATUS_ACCESS_DENIED            ((NTSTATUS)0xC0000022L)
+    #endif
+    #ifndef STATUS_OBJECT_NAME_NOT_FOUND
+        #define STATUS_OBJECT_NAME_NOT_FOUND    ((NTSTATUS)0xC0000034L)
+    #endif
+    #ifndef STATUS_OBJECT_PATH_NOT_FOUND
+        #define STATUS_OBJECT_PATH_NOT_FOUND    ((NTSTATUS)0xC000003AL)
+    #endif
+    #ifndef STATUS_SHARING_VIOLATION
+        #define STATUS_SHARING_VIOLATION        ((NTSTATUS)0xC0000043L)
+    #endif
+    #ifndef STATUS_INVALID_HANDLE
+        #define STATUS_INVALID_HANDLE           ((NTSTATUS)0xC0000008L)
+    #endif
+    #ifndef STATUS_END_OF_FILE
+        #define STATUS_END_OF_FILE              ((NTSTATUS)0xC0000011L)
+    #endif
+    #ifndef STATUS_CANCELLED
+        #define STATUS_CANCELLED                ((NTSTATUS)0xC0000120L)
+    #endif
+    #ifndef STATUS_DEVICE_NOT_READY
+        #define STATUS_DEVICE_NOT_READY         ((NTSTATUS)0xC000009DL)
+    #endif
+    #ifndef STATUS_BUFFER_OVERFLOW
+        #define STATUS_BUFFER_OVERFLOW          ((NTSTATUS)0x40000006L)
+    #endif
+    #ifndef STATUS_BUFFER_TOO_SMALL
+        #define STATUS_BUFFER_TOO_SMALL         ((NTSTATUS)0xC0000023L)
+    #endif
 
-#ifndef STATUS_INVALID_PARAMETER
-    #define STATUS_INVALID_PARAMETER     ((NTSTATUS)0xC000000DL)
-#endif
-
-#ifndef STATUS_INSUFFICIENT_RESOURCES
-    #define STATUS_INSUFFICIENT_RESOURCES ((NTSTATUS)0xC000009AL)
-#endif
-
-#ifndef STATUS_PENDING
-    #define STATUS_PENDING                ((NTSTATUS)0x00000103L)
-#endif
-
-#ifndef STATUS_TIMEOUT
-    #define STATUS_TIMEOUT                ((NTSTATUS)0x00000102L)
-#endif
 
 #ifndef OBJ_CASE_INSENSITIVE
     #define OBJ_CASE_INSENSITIVE          0x00000040L
@@ -364,6 +399,97 @@ NTSTATUS ConvertAnsiToWideStatic(const char* ansiSrc, WCHAR* wideDest, size_t de
     // all'interno del buffer statico dello stack, a costo zero a runtime.
     return RtlStringCchPrintfW(wideDest, destCch, L"%S", ansiSrc);
 }
+
+// Mappatura dell'oggetto Evento del Kernel sull'Handle Win32 ordinario
+typedef struct _KEVENT {
+    HANDLE Handle;
+} KEVENT, *PKEVENT;
+
+
+typedef enum _EVENT_TYPE {
+    NotificationEvent,
+    SynchronizationEvent
+} EVENT_TYPE;
+
+
+inline void KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State) {
+    UNREFERENCED_PARAMETER(Type);
+    if (Event) {
+        // Crea un evento Win32 manual-reset o auto-reset anonimo
+        Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+    }
+}
+
+inline NTSTATUS KeWaitForSingleObject(PVOID Object, char WaitReason, char WaitMode, BOOLEAN Alertable, LARGE_INTEGER* Timeout) {
+    UNREFERENCED_PARAMETER(WaitReason);
+    UNREFERENCED_PARAMETER(WaitMode);
+    UNREFERENCED_PARAMETER(Alertable);
+
+    PKEVENT pEvent = reinterpret_cast<PKEVENT>(Object);
+    if (!pEvent || !pEvent->Handle) return STATUS_INVALID_PARAMETER;
+
+    DWORD dwTimeoutMs = INFINITE;
+    if (Timeout != NULL) {
+        // A Ring 0 il timeout è relativo, negativo ed espresso in unità da 100ns
+        // Convertiamo in millisecondi positivi per Win32: ms = Ticks / -10000
+        LONGLONG ticks = Timeout->QuadPart;
+        if (ticks < 0) {
+            dwTimeoutMs = static_cast<DWORD>(ticks / -10000);
+        }
+    }
+
+    DWORD waitResult = WaitForSingleObject(pEvent->Handle, dwTimeoutMs);
+    if (waitResult == WAIT_TIMEOUT) return STATUS_TIMEOUT;
+    if (waitResult == WAIT_OBJECT_0) return STATUS_SUCCESS;
+    return STATUS_UNSUCCESSFUL;
+}
+
+// Abilitiamo il comando di annullamento dell'I/O asincrono per lo spazio utente
+#define ZwCancelIoFile(FileHandle, IoStatusBlock) \
+(CancelIoEx((FileHandle), NULL) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * Converte un codice NTSTATUS nella sua stringa letterale corrispondente.
+ * Ritorna un puntatore statico a caratteri costante (const char*) esente da heap allocation.
+ */
+inline const char* NtStatusToString(NTSTATUS status) {
+    switch (status) {
+        // --- CODICI DI SUCCESSO E STATO INTERMEDIO ---
+        case STATUS_SUCCESS:                return "STATUS_SUCCESS (0x00000000)";
+        case STATUS_PENDING:                return "STATUS_PENDING (0x00000103)";
+        case STATUS_TIMEOUT:                return "STATUS_TIMEOUT (0x00000102)";
+
+        // --- CODICI DI ERRORE GENERICI ---
+        case STATUS_UNSUCCESSFUL:           return "STATUS_UNSUCCESSFUL (0xC0000001)";
+        case STATUS_INVALID_PARAMETER:      return "STATUS_INVALID_PARAMETER (0xC000000D)";
+        case STATUS_INSUFFICIENT_RESOURCES: return "STATUS_INSUFFICIENT_RESOURCES (0xC000009A)";
+        case STATUS_INVALID_DEVICE_STATE:   return "STATUS_INVALID_DEVICE_STATE (0xC0000184)";
+
+        // --- ERRORI DI MEMORIA, ACCESSO E OGGETTI NATIVI NT ---
+        case STATUS_ACCESS_VIOLATION:       return "STATUS_ACCESS_VIOLATION (0xC0000005)";
+        case STATUS_ACCESS_DENIED:          return "STATUS_ACCESS_DENIED (0xC0000022)";
+        case STATUS_OBJECT_NAME_NOT_FOUND:  return "STATUS_OBJECT_NAME_NOT_FOUND (0xC0000034)";
+        case STATUS_OBJECT_PATH_NOT_FOUND:  return "STATUS_OBJECT_PATH_NOT_FOUND (0xC000003A)";
+        case STATUS_SHARING_VIOLATION:      return "STATUS_SHARING_VIOLATION (0xC0000043)";
+        case STATUS_INVALID_HANDLE:         return "STATUS_INVALID_HANDLE (0xC0000008)";
+        case STATUS_END_OF_FILE:            return "STATUS_END_OF_FILE (0xC0000011)";
+        case STATUS_CANCELLED:              return "STATUS_CANCELLED (0xC0000120)";
+        case STATUS_DEVICE_NOT_READY:       return "STATUS_DEVICE_NOT_READY (0xC000009D)";
+        case STATUS_BUFFER_OVERFLOW:        return "STATUS_BUFFER_OVERFLOW (0x40000006)";
+        case STATUS_BUFFER_TOO_SMALL:       return "STATUS_BUFFER_TOO_SMALL (0xC0000023)";
+
+        // --- FALLBACK PER CODICI VARIABILI NON CENSITI ---
+        default:                            return "STATUS_UNKNOWN_NT_ERROR";
+    }
+}
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

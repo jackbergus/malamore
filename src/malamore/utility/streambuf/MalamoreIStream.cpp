@@ -26,7 +26,7 @@ NTSTATUS MalamoreIStream::Open(const MalamorePath& path, StreamDisposition dispo
     OBJECT_ATTRIBUTES objAttr;
     HANDLE hFile = NULL;
 
-    status = RtlStringCchCopyW(m_SavedPath, MAX_PATH, path.ToKernelPath(m_SavedPath, MAX_PATH));
+    status = RtlStringCchCopyW(m_SavedPath, MAX_PATH, path.ToPath(m_SavedPath, MAX_PATH));
     if (!NT_SUCCESS(status)) return status;
 
     RtlInitUnicodeString(&m_UnicodePath, m_SavedPath);
@@ -103,4 +103,132 @@ size_t MalamoreIStream::GetLine(char* buffer, size_t maxCount, char delimiter) {
 
     buffer[count] = '\0'; // Terminazione della stringa di Ring 0
     return count;
+}
+
+
+/**
+ * LETTURA PERIODICA TIMED CON ANNULLAMENTO COMPENSATO (RING 0 / RING 3)
+ * Nota: Deve essere eseguita esclusivamente a PASSIVE_LEVEL
+ */
+NTSTATUS MalamoreIStream::ReadWithTimeout(
+    VOID* outBuffer,
+    ULONG bytesToRead,
+    ULONG timeoutUs,
+    ULONG* bytesActuallyRead
+) {
+    if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    *bytesActuallyRead = 0;
+    HANDLE hFile = m_StreamBuf.GetHandle();
+    if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
+
+    NTSTATUS status;
+    IO_STATUS_BLOCK ioStatus;
+    KEVENT ioEvent;
+
+    // 1. Inizializzazione dell'evento hardware di sincronizzazione asincrona
+    KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
+
+    // 2. Lancio della lettura asincrona non bloccante
+    // Passiamo l'indirizzo di &ioEvent. L'I/O Manager di WindowsNT metterà in coda l'IRP
+    // e sveglierà l'evento non appena l'hardware caricherà i dati nel buffer.
+    status = ZwReadFile(
+        hFile,
+        &ioEvent,                   // Handle dell'evento da segnalare al completamento (Ring 0)
+        NULL, NULL,                 // ApcRoutine, ApcContext
+        &ioStatus,
+        outBuffer,                  // Buffer lineare di ricezione passato dall'utente
+        bytesToRead,                // Dimensione massima richiesta
+        NULL,                       // Legge dalla posizione corrente del puntatore file/stream
+        NULL
+    );
+
+    // 3. SE L'I/O ENTRA IN CODA ASINCRONA (STATUS_PENDING)
+    if (status == STATUS_PENDING) {
+        LARGE_INTEGER kernelTimeout;
+        // Conversione esplicita inline da microsecondi alle unità da 100ns negative del WDK
+        kernelTimeout.QuadPart = -(LONGLONG)(timeoutUs * 10);
+
+        // Attesa controllata: Blocca il core logico SOLO per il budget concesso dall'utente
+        NTSTATUS waitStatus = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, &kernelTimeout);
+
+        if (waitStatus == STATUS_TIMEOUT) {
+            // HARDWARE TIMEOUT COMPENSATO: La periferica o il file non hanno risposto in tempo.
+            // Forza l'annullamento immediato dell'IRP orfano per non lasciare descrittori corrotti nel kernel.
+            ZwCancelIoFile(hFile, &ioStatus);
+            return STATUS_TIMEOUT;
+        } else {
+            // L'evento si è svegliato prima dello scadere del timeout!
+            // Estraiamo il codice finale reale iniettato dall'I/O Manager nel blocco di stato.
+            status = ioStatus.Status;
+        }
+    }
+
+    // 4. VERIFICA E CONTEGGIO DEI BYTE EFFETTIVAMENTE EXTRARE
+    if (NT_SUCCESS(status)) {
+        *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
+        return STATUS_SUCCESS;
+    }
+
+    return status;
+}
+
+
+/**
+ * LETTURA ASINCRONA CON ATTESA BLOCCANTE INFINITA (GIRA A PASSIVE_LEVEL)
+ */
+NTSTATUS MalamoreIStream::ReadBlocking(
+    VOID* outBuffer,
+    ULONG bytesToRead,
+    ULONG* bytesActuallyRead
+) {
+    if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    *bytesActuallyRead = 0;
+    HANDLE hFile = m_StreamBuf.GetHandle();
+    if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
+
+    NTSTATUS status;
+    IO_STATUS_BLOCK ioStatus;
+    KEVENT ioEvent;
+
+    // 1. Inizializzazione dell'evento per la segnalazione asincrona
+    KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
+
+    // 2. Lancio della lettura asincrona non bloccante legata all'evento
+    status = ZwReadFile(
+        hFile,
+        &ioEvent,                   // L'I/O Manager sveglierà questo evento al termine
+        NULL, NULL,
+        &ioStatus,
+        outBuffer,
+        bytesToRead,
+        NULL,
+        NULL
+    );
+
+    // 3. SE L'OPERAZIONE VA IN CODA (STATUS_PENDING)
+    if (status == STATUS_PENDING) {
+        // SCELTA ARCHITETTURALE: Passiamo NULL come quinto parametro (Timeout).
+        // Questo dice al processore di congelare il thread in modo indefinito finché
+        // il bus dati hardware non ha completato il travaso dei byte nella cache.
+        status = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, NULL); // <--- NULL = ATTESA INFINITA
+
+        if (NT_SUCCESS(status)) {
+            // Estraiamo il codice finale immesso dall'hardware nel blocco di stato
+            status = ioStatus.Status;
+        }
+    }
+
+    // 4. CONTEGGIO FINALE DEI BYTE ACQUISITI
+    if (NT_SUCCESS(status)) {
+        *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
+        return STATUS_SUCCESS;
+    }
+
+    return status;
 }

@@ -26,7 +26,7 @@ NTSTATUS MalamoreOStream::Open(const MalamorePath& path, StreamDisposition dispo
     OBJECT_ATTRIBUTES objAttr;
     HANDLE hFile = NULL;
 
-    status = RtlStringCchCopyW(m_SavedPath, MAX_PATH, path.ToKernelPath(m_SavedPath, MAX_PATH));
+    status = RtlStringCchCopyW(m_SavedPath, MAX_PATH, path.ToPath(m_SavedPath, MAX_PATH));
     if (!NT_SUCCESS(status)) return status;
 
     RtlInitUnicodeString(&m_UnicodePath, m_SavedPath);

@@ -38,6 +38,11 @@ public:
     // Estrae una riga intera fino al terminatore (Sostituisce std::getline)
     size_t GetLine(char* buffer, size_t maxCount, char delimiter = '\n');
     int Get(); // Ritorna il singolo carattere corrente o -1 (EOF)
+
+    // Variante 1: Lettura asincrona con controllo rigido del timeout
+    NTSTATUS ReadWithTimeout(VOID* outBuffer, ULONG bytesToRead, ULONG timeoutUs, ULONG* bytesActuallyRead);
+    // Variante 2: LETTURA ASINCRONA BLOCCANTE PURA (SENZA TIMEOUT)
+    NTSTATUS ReadBlocking(VOID* outBuffer, ULONG bytesToRead, ULONG* bytesActuallyRead);
 };
 
 #endif

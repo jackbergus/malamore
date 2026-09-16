@@ -207,3 +207,6 @@ target_link_libraries(writing_thread_test Catch2WithMain user_level_struct_libra
 
 add_executable(structures_test tests/structures_test.cpp)
 target_link_libraries(structures_test Catch2WithMain user_level_struct_library)
+
+add_executable(test_read_driver TestReadDriver.cpp)
+target_link_libraries(test_read_driver user_level_struct_library)
