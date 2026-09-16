@@ -3,6 +3,8 @@
 //
 
 #include <malamore/structures/MessageMap.h>
+
+#include "malamore/utility/math.h"
 // #include <ntddk.h>
 
 // #include <cstring> // Utilizzo delle funzioni standard per l'azzeramento e copia della memoria
@@ -41,7 +43,7 @@ BOOLEAN MessageMap_Push(struct MessageMap* cb, ULONG Other, PCHAR Buffer, ULONG 
     RtlCopyMemory(cb->Nodes[cb->Tail].Buffer, Buffer, BUFLEN);
 
     // Avanzamento dell'indice Tail in modo circolare
-    cb->Tail = (cb->Tail + 1) % IN_MSG_BUFFER_SIZE;
+    cb->Tail = Malamore::Math::WrapIndex<IN_MSG_BUFFER_SIZE>((cb->Tail + 1));
     cb->Size++;
 
     return TRUE;
@@ -58,7 +60,7 @@ BOOLEAN MessageMap_Pop(struct MessageMap* cb) {
     if (cb == nullptr || cb->Size == 0) return FALSE;
 
     // Riqualifica l'elemento come rimosso modificando solo l'indice (Nessuna copia eseguita)
-    cb->Head = (cb->Head + 1) % IN_MSG_BUFFER_SIZE;
+    cb->Head = Malamore::Math::WrapIndex<IN_MSG_BUFFER_SIZE>((cb->Head + 1));
     cb->Size--;
 
     return TRUE;
