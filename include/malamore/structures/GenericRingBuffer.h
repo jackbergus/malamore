@@ -9,7 +9,7 @@
 #ifndef MALAMORE_GENERICRINGBUFFER_H
 #define MALAMORE_GENERICRINGBUFFER_H
 
-#include <ntddk.h>
+#include <malamore/utility/kernel_compatibility.h>
 
 #pragma pack(push, 1)
 // Il TAS Lock rimane compatto a 1 byte o 4 byte
@@ -23,6 +23,7 @@ struct TAS_CHANNEL_LOCK {
 template <typename T, ULONG QueueDepth>
 struct GenericRingBuffer {
     struct TAS_CHANNEL_LOCK WriteLock;
+    static constexpr ULONG QUEUE_DEPTH = QueueDepth;
 
     volatile LONG ReadIndex;
     volatile LONG WriteIndex;

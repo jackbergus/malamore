@@ -4,7 +4,7 @@
 
 #ifndef MALAMORE_INTERPROCESSCHANNELDATA_H
 #define MALAMORE_INTERPROCESSCHANNELDATA_H
-#include <ntdef.h>
+// #include <ntdef.h>
 #include <malamore/structures/GenericRingBuffer.h>
 
 
@@ -19,11 +19,15 @@
 #define CHANNEL_BUFFER_SIZE                 (16)
 #endif
 
+#ifndef  DataChannelParcelArraySize
+#define     DataChannelParcelArraySize      (1024)
+#endif
+
     struct DataChannelParcel {
         ULONG Timestamp;
         ULONG SourceNodeId;
         ULONG DataLength;
-        UCHAR PayloadData[1024];
+        UCHAR PayloadData[DataChannelParcelArraySize];
     };
     // Il canale IPC diventa:
     using InterProcessChannelData = GenericRingBuffer<struct DataChannelParcel, CHANNEL_BUFFER_SIZE>;
@@ -35,6 +39,7 @@
 
     // Scrittura protetta per molteplici scrittori concorrenti a DISPATCH_LEVEL
     BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, const struct DataChannelParcel* newMsg);
+    BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONG Timestamp, ULONG SourceNodeId, const UCHAR* PayloadData ,ULONG DataLength);
 
     // Lettura asimmetrica Lock-Free / Zero-Copy per singolo lettore dedicato
     const struct DataChannelParcel* RealTimeIPC_Top(const InterProcessChannelData* cb);

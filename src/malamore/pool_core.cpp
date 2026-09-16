@@ -60,6 +60,7 @@ VOID DiskWriterThreadRoutine(_In_ PVOID Context) {
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
+#if 0
 NTSTATUS InitializeCorePool(ULONG PercentageToUse) {
     NTSTATUS status;
     RtlZeroMemory(&g_PoolRegistry, sizeof(CorePoolRegistry));
@@ -288,3 +289,4 @@ VOID StopAndFreeCorePool() {
     }
     g_PoolRegistry.ActiveAllocatedCores = 0;
 }
+#endif

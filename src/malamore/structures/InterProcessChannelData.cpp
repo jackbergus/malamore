@@ -3,7 +3,7 @@
 //
 
 #include <malamore/structures/InterProcessChannelData.h>
-#include <ntddk.h>
+// #include <ntddk.h>
 
 
 void RealTimeIPC_Init(InterProcessChannelData* cb) {
@@ -28,6 +28,51 @@ BOOLEAN RealTimeIPC_IsEmpty(const InterProcessChannelData* cb) {
 BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, const struct DataChannelParcel* newMsg) {
     if (cb == nullptr || newMsg == nullptr) return FALSE;
     return cb->Push(newMsg);
+}
+
+/*ULONG Timestamp;
+ULONG SourceNodeId;
+ULONG DataLength;
+UCHAR PayloadData[1024];*/
+
+BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONG Timestamp, ULONG SourceNodeId, const UCHAR* PayloadData ,ULONG DataLength) {
+    if (cb == nullptr) return FALSE;
+     {
+
+        // 1. Acquisizione del lock tra i soli scrittori concorrenti
+        while (InterlockedExchange(&cb->WriteLock.WriterState, 1) == 1) {
+            YieldProcessor(); // Istruzione assembly PAUSE
+        }
+
+        // 2. Controllo dello spazio all'interno dell'area protetta
+        if (cb->IsFull()) {
+            InterlockedExchange(&cb->WriteLock.WriterState, 0); // Rilascio di sicurezza
+            return FALSE;
+        }
+
+        // Mascheramento bit a bit velocissimo (funziona se QueueDepth è potenza di 2)
+        LONG currentWrite = cb->WriteIndex & (InterProcessChannelData::QUEUE_DEPTH - 1);
+        if (DataLength > DataChannelParcelArraySize) {
+            DataLength = DataChannelParcelArraySize;
+        }
+        auto& memory= cb->Buffer[currentWrite];
+        memory.Timestamp  = Timestamp;
+        memory.SourceNodeId = SourceNodeId;
+        memory.DataLength = DataLength;
+        RtlCopyMemory(&memory.PayloadData, PayloadData, DataLength);
+
+        // Hardware Memory Barrier contro le ottimizzazioni out-of-order della CPU
+        KeMemoryBarrier();
+
+        cb->WriteIndex = (cb->WriteIndex + 1) & (InterProcessChannelData::QUEUE_DEPTH - 1);
+
+        // 3. Rilascio del lock
+        InterlockedExchange(&cb->WriteLock.WriterState, 0);
+
+        // 4. Incremento atomico per svegliare il singolo lettore
+        InterlockedIncrement(&cb->MessageCount);
+        return TRUE;
+    }
 }
 
 /**

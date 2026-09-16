@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+add_subdirectory(submodules/Catch2)
+
 # ==============================================================================
 # CONFIGURAZIONI DEL DRIVER (Modifica qui i tuoi parametri)
 # ==============================================================================
@@ -187,3 +189,7 @@ add_custom_target(CertificaDriver ALL
         DEPENDS "${SIGN_MARKER}"
         COMMENT "Pipeline di certificazione completata con successo!"
 )
+
+
+add_executable(writing_thread_test tests/writing_thread_test.cpp)
+target_link_libraries(writing_thread_test Catch2WithMain)

@@ -103,6 +103,7 @@ NTSTATUS CorePool_InitializeRegistry() {
         // Se lo spawn fallisce, esegue il rollback chiudendo l'handle del file aperto
         ZwClose(g_PoolRegistry.hFileHandle);
         g_PoolRegistry.hFileHandle = NULL;
+        g_PoolRegistry.hDiskThread = NULL;
         g_PoolRegistry.IsRegistryActive = FALSE;
         KdPrint(("[MALAMORE DRIVER] Not enough resources to create the telemetry thread\n"));
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -248,9 +249,10 @@ NTSTATUS CorePool_RegisterGenericTask(
     return STATUS_SUCCESS;
 }
 
-NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet) {
+NTSTATUS CorePool_RouteMessageToDest(ULONG sourceNodeId, ULONG targetNodeId, const struct DataChannelParcel* packet) {
     ULONG channelIndex = targetNodeId % MAX_GENERIC_TASKS;
     InterProcessChannelData* pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
+
 
     if (RealTimeIPC_Push(pChannel, packet)) {
         return STATUS_SUCCESS;
@@ -273,7 +275,7 @@ NTSTATUS CorePool_StartPoolExecution() {
     // Calcolo della Barriera Oraria Unica Globale (Tempo Attuale + 1ms di rincorsa)
     // Questo millisecondo fornisce il budget di tempo necessario alla CPU per completare
     // i cambi di contesto e posizionare i thread sui core corretti prima dello scatto in fase.
-    ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000W64);
+    ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
     g_PoolRegistry.GlobalSynchronizedStartTicks = synchronizedStart;
     g_PoolRegistry.GlobalPerfCounterFrequency = freq.QuadPart;
 

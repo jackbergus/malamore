@@ -1,11 +1,13 @@
 #pragma once
-#include "client.h"
-#include "malamore/ipc_manager.h"
-#include "malamore/thread_generic_polling.h"
+// #include "client.h"
+// #include "malamore/ipc_manager.h"
+// #include "malamore/thread_generic_polling.h"
 
 #define MAX_POOL_CORES 32
 #define TELEMETRY_QUEUE_SIZE 128
+#include "client.h"
 
+#if 0
 #pragma pack(push, 1)
 struct TelemetryRecord {
     ULONG64 Timestamp;
@@ -56,6 +58,7 @@ struct CorePoolRegistry {
     TelemetryQueue LogQueue;
     HANDLE hFileHandle;
 };
+#endif
 
 #ifdef __cplusplus
 extern "C" {

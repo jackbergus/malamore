@@ -26,6 +26,7 @@ struct CorePoolRegistry {
 
     // Telemetry Management
     HANDLE                  hFileHandle;
+    HANDLE                  hDiskThread;
     volatile LONG           TerminateDiskThread;
     InterProcessChannelData TelemetryChannel;
     MalamoreThreadSlot      TelemetryThread;
@@ -46,5 +47,9 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
+static __inline LONG KernelAtomicRead(volatile LONG* Target) {
+    return InterlockedOr(const_cast<LONG*>(Target), 0);
+}
 
 #endif //MALAMORE_THREAD_POOL_H

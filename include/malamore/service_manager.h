@@ -5,26 +5,20 @@
 #ifndef SERVICES_MANAGER_H
 #define SERVICES_MANAGER_H
 
-#include <malamore.h>
-
 #include "threads/thread_shared.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-    // Liste e lock globali esportati per il driver principale
-    // extern LIST_ENTRY g_ListaServizi;
-    // extern ERESOURCE g_ListaLock;
-
-    // // Funzioni pubbliche di gestione dei servizi
-    // VOID InizializzaManagerServizi(VOID);
-    // VOID DeinizializzaManagerServizi(VOID);
-    // NTSTATUS AvviaNuovoServizio(PSERVIZIO_CONFIG_INPUT Input);
-    // NTSTATUS AggiornaParametriServizio(ULONG ServizioId, PLONG NuoviParametri);
-    // NTSTATUS FermaServizio(ULONG ServizioId);
-
-    // Rintraccia il puntatore alla funzione del kernel in base al nome stringa fornito dal client
+    /**
+     *
+     * Ricerca il task per nome all'interno della tabella delle associazioni. In quanto siamo purtroppo nel kernel, ci
+     * tocca scandire un'array lineare senza ricorrere alla std::map (dato che la tabella può essere popolata dall'utente)
+     *
+     * @param taskName Il nome del task da ricercare nella tabella delle dichiarazioni
+     * @return Se esiste il puntatore all'entrypoint del task summenzionato, verraà restituito il puntatore-non nullo
+     *         associato
+     */
     PFN_EXECUTE_ROUTINE_IO CercaTaskInTabella(const char* taskName);
 
 #ifdef __cplusplus

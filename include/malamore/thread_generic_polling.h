@@ -73,9 +73,7 @@ struct CorePollingContext {
     BOOLEAN saveFileToDisk;
 };
 
-static __inline LONG KernelAtomicRead(volatile LONG* Target) {
-    return InterlockedOr(const_cast<LONG*>(Target), 0);
-}
+
 #endif
 
 #ifdef __cplusplus
