@@ -93,6 +93,12 @@
     #define OBJ_KERNEL_HANDLE             0x00000200L
 #endif
 
+#ifndef PKSTART_ROUTINE
+// Mappa la firma della routine di Ring 0 sul tipo utente di Win32
+// PKSTART_ROUTINE a Ring 0 è un puntatore a funzione: VOID (*PKSTART_ROUTINE)(PVOID Context)
+typedef DWORD (WINAPI *PKSTART_ROUTINE)(LPVOID lpThreadParameter);
+#endif
+
     #ifndef NT_SUCCESS
         #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
     #endif
