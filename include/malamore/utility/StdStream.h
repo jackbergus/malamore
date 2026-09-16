@@ -9,6 +9,7 @@
 #include <malamore/utility/streambuf/KernelStreamBuf.h>
 #include <malamore/utility/streambuf/MalamoreIStream.h>
 #include <malamore/utility/streambuf/MalamoreOStream.h>
+#include <malamore/utility/streambuf/MalamoreIOStream.h>
 
 
 #endif //MALAMORE_KERNELSTREAM_H

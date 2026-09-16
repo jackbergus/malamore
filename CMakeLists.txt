@@ -203,6 +203,8 @@ add_library(user_level_struct_library OBJECT
         src/malamore/utility/streambuf/MalamoreOStream.cpp
         src/malamore/threads/thread_pool.cpp
         src/malamore/wrapper_tasks/hardware_reader.cpp
+        src/malamore/winapi_client/Win32NamedPipeGuard.cpp
+        src/malamore/utility/streambuf/MalamoreIOStream.cpp
 )
 
 add_executable(writing_thread_test tests/writing_thread_test.cpp)

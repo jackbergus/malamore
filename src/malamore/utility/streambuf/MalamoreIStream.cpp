@@ -35,17 +35,20 @@ NTSTATUS MalamoreIStream::Open(const MalamorePath& path, ULONG flags) {
     // =========================================================================
     // MOTORE DI TRADUZIONE: DA LOGICA BITMASK POSIX A STRATO HARDWARE WINDOWS NT
     // =========================================================================
-    ACCESS_MASK desiredAccess = SYNCHRONIZE;
+
     ULONG nativeDisposition = 0;
+    bool isAppend = (flags & StreamFlags::Append) == StreamFlags::Append;
+    bool isHW = path.is_hardware_device();
+    ACCESS_MASK desiredAccess = isHW ? SYNCHRONIZE : 0;
 
     // 1. Risoluzione dei flag di Accesso (Read, Write, Append)
     if (flags & StreamFlags::Append) {
         desiredAccess |= FILE_APPEND_DATA;
     } else if (flags & StreamFlags::Write) {
-        desiredAccess |= FILE_WRITE_DATA;
+        desiredAccess |= isHW ? GENERIC_WRITE : FILE_WRITE_DATA;
     }
     if (flags & StreamFlags::Read) {
-        desiredAccess |= GENERIC_READ;
+        desiredAccess |= isHW ? GENERIC_READ : FILE_READ_DATA;
     }
 
     // 2. Risoluzione ortogonale delle regole di Creazione e Troncamento (Creat, Trunc)
@@ -61,7 +64,7 @@ NTSTATUS MalamoreIStream::Open(const MalamorePath& path, ULONG flags) {
     }
 
     status = ZwCreateFile(&hFile, desiredAccess, &objAttr, &ioStatus, NULL,
-                          FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, nativeDisposition, FILE_NON_DIRECTORY_FILE, NULL, 0);
+                          FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, nativeDisposition, FILE_NON_DIRECTORY_FILE, NULL, 0);
 
     if (NT_SUCCESS(status)) {
         m_StreamBuf.AttachHandle(hFile);

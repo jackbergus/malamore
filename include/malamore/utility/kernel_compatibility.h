@@ -179,6 +179,18 @@ typedef DWORD (WINAPI *PKSTART_ROUTINE)(LPVOID lpThreadParameter);
 #define FILE_NON_DIRECTORY_FILE   0x00000040 // <--- AGGIUNTO PER LA COMPILAZIONE DI KERNELSTREAM
 #endif
 
+// Mappatura dell'oggetto Evento del Kernel sull'Handle Win32 ordinario
+typedef struct _KEVENT {
+    HANDLE Handle;
+} KEVENT, *PKEVENT;
+
+
+typedef enum _EVENT_TYPE {
+    NotificationEvent,
+    SynchronizationEvent
+} EVENT_TYPE;
+
+
     // Strutture Kernel simulate a Ring 3
     struct UNICODE_STRING {
         unsigned short Length;
@@ -305,7 +317,7 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
             creationDisposition = OPEN_ALWAYS;
         }
 
-        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes, NULL);
+        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes | FILE_FLAG_OVERLAPPED, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
@@ -337,19 +349,44 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
             return STATUS_INVALID_PARAMETER;
         }
 
+        // Estrae la struttura KEVENT reale passata dal modulo
+        PKEVENT pKernelEvent = reinterpret_cast<PKEVENT>(Event);
+
+        // Allocazione localizzata nello stack della maschera asincrona nativa di Win32
+        OVERLAPPED overlappedContext;
+        RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
+
+        // Se lo stream ha configurato un evento di notifica, lo leghiamo al contesto Overlapped
+        if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
+            overlappedContext.hEvent = pKernelEvent->Handle;
+        }
+
         DWORD bytesRead = 0;
         // Simulazione della lettura asincrona non bloccante.
         // Nota: se desideri emulare STATUS_PENDING nei test, puoi forzarlo condizionalmente qui.
-        BOOL success = ReadFile(FileHandle, Buffer, Length, &bytesRead, NULL);
+        BOOL success = ReadFile(FileHandle, Buffer, Length, &bytesRead, &overlappedContext);
 
         IoStatusBlock->Information = bytesRead;
         if (success) {
+            IoStatusBlock->Information = bytesRead;
             IoStatusBlock->Status = STATUS_SUCCESS;
             return STATUS_SUCCESS;
-        } else {
-            IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
-            return STATUS_UNSUCCESSFUL;
         }
+
+        DWORD lastError = GetLastError();
+
+        // IL VERO COMPORTAMENTO DI RING 0 ABILITATO IN USER-MODE:
+        // Se Windows NT prende in carico l'operazione in background, l'API ritorna ERROR_IO_PENDING.
+        // Lo traduciamo istantaneamente in STATUS_PENDING sbloccando ZwReadFile!
+        if (lastError == ERROR_IO_PENDING) {
+            IoStatusBlock->Status = STATUS_PENDING;
+            return STATUS_PENDING; // <--- RISOLUTIVO: ZwReadFile ritorna subito e non si pianta più!
+        }
+
+        // Gestione degli altri errori fisici reali (es. file system rimosso o pipe rotta)
+        IoStatusBlock->Information = 0;
+        IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
+        return STATUS_UNSUCCESSFUL;
     }
 
     inline NTSTATUS ZwWriteFile(
@@ -431,16 +468,6 @@ NTSTATUS ConvertAnsiToWideStatic(const char* ansiSrc, WCHAR* wideDest, size_t de
     return RtlStringCchPrintfW(wideDest, destCch, L"%S", ansiSrc);
 }
 
-// Mappatura dell'oggetto Evento del Kernel sull'Handle Win32 ordinario
-typedef struct _KEVENT {
-    HANDLE Handle;
-} KEVENT, *PKEVENT;
-
-
-typedef enum _EVENT_TYPE {
-    NotificationEvent,
-    SynchronizationEvent
-} EVENT_TYPE;
 
 
 inline void KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State) {
