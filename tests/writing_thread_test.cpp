@@ -11,9 +11,6 @@
 
 #include "malamore/threads/ThreadGuard.h"
 
-uint32_t factorial( uint32_t number ) {
-    return number <= 1 ? number : factorial(number-1) * number;
-}
 
 VOID bogus_task(PVOID Context, struct FutureResultParcel* OutResult) {
     if (OutResult) {
@@ -22,7 +19,7 @@ VOID bogus_task(PVOID Context, struct FutureResultParcel* OutResult) {
     }
 }
 
-TEST_CASE( "Factorials are computed", "[factorial]" ) {
+TEST_CASE( "Testing Threads with future support-", "[simple bogus task]" ) {
     UnifiedThreadInterface if_;
     ThreadGuard thread1(&if_, bogus_task);
     thread1.Start();
