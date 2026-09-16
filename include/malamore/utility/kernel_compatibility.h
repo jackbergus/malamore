@@ -581,6 +581,18 @@ inline const char* NtStatusToString(NTSTATUS status) {
     }
 }
 
+#ifndef ALL_PROCESSOR_GROUPS
+#define ALL_PROCESSOR_GROUPS 0xFFFF
+#endif
+
+/**
+ * Mappatura speculare di KeQueryActiveProcessorCountEx per lo spazio utente (Ring 3)
+ */
+inline ULONG KeQueryActiveProcessorCountEx(USHORT GroupNumber) {
+    // Se il modulo richiede ALL_PROCESSOR_GROUPS (0xFFFF), GetActiveProcessorCount
+    // accetta lo stesso identico valore per restituire il totale globale dei core logici del sistema.
+    return GetActiveProcessorCount(GroupNumber);
+}
 
 
 #ifdef __cplusplus

@@ -3,7 +3,7 @@
 // #include "malamore/ipc_manager.h"
 // #include "malamore/thread_generic_polling.h"
 
-#define MAX_POOL_CORES 32
+
 #define TELEMETRY_QUEUE_SIZE 128
 #include "client.h"
 

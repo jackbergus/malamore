@@ -25,6 +25,19 @@ ThreadGuard::~ThreadGuard() {
     }
 }
 
+void ThreadGuard::Init(struct UnifiedThreadInterface *threadSlot, PFN_FUTURE_THREAD_ROUTINE routine) {
+    if (!m_IsStarted) {
+        this->fields.Slot = threadSlot;
+        this->fields.RealRoutine = routine;
+        if (this->fields.Slot != nullptr) {
+            this->fields.Slot->ThreadHandle = NULL;
+            this->fields.Slot->IsCompleted = 0;
+            RtlZeroMemory(&this->fields.Slot->Context, sizeof(struct UnifiedThreadContext));
+            RtlZeroMemory(&this->fields.Slot->FutureResult, sizeof(struct FutureResultParcel));
+        }
+    }
+}
+
 // =========================================================================
 // COPIA DI SICUREZZA DIRETTA TRA STRUTTURE COMPATTE DEL THUNK
 // =========================================================================

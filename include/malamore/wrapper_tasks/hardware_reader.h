@@ -5,15 +5,15 @@
 #ifndef MALAMORE_HARDWARE_READER_H
 #define MALAMORE_HARDWARE_READER_H
 
-#include <windows.h>
+// #include <windows.h>
 #include <malamore/structures/MessageMap.h>
 
-#pragma once
+// #pragma once
 // #include "malamore/ipc_manager.h"
 
-#define HARDWARE_PAYLOAD_SIZE       (512)
-#define HARDWARE_READER_ID          (ULONG_MAX-1)
 
+
+#if 0
 #pragma pack(push, 1)
 // Contesto operativo del Thread di Lettura Hardware a PASSIVE_LEVEL
 struct HWTaskContext {
@@ -36,6 +36,7 @@ struct HWTaskContext {
     ULONG TargetThreadId;
 };
 #pragma pack(pop)
+#endif
 
 #ifdef __cplusplus
 extern "C" {

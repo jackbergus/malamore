@@ -20,7 +20,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
 
     LARGE_INTEGER freq;
     KeQueryPerformanceCounter(&freq);
-    ULONG64 periodTicks = (static_cast<ULONG64>(Context->PeriodUs) * Context->PerfCounterFrequency) / 1000000ULL;
+    // const ULONG64 periodTicks = (static_cast<ULONG64>(Context->PeriodUs) * Context->PerfCounterFrequency) / 1000000ULL;
 
     LARGE_INTEGER currentTime, nextPeriodTime;
     GROUP_AFFINITY targetAffinity, previousAffinity;
@@ -47,30 +47,17 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     }
 
     // Allineamento temporale iniziale sulla barriera comune pre-calcolata
-    nextPeriodTime.QuadPart = Context->SynchronizedStartTicks;
+    INIT_SYNCH_FROM_CONTEXT(&nextPeriodTime, Context, periodTicks);  //nextPeriodTime.QuadPart = Context->SynchronizedStartTicks;
     UCHAR idata[HARDWARE_PAYLOAD_SIZE];
 
     // =========================================================================
     // LOOP PRINCIPALE DI LETTURA PERIODICA ASINCRONA (PASSIVE_LEVEL - 3.33ms)
     // =========================================================================
-    while (KernelAtomicRead(&Context->KeepRunning) == 1) {
-        do {
-            YieldProcessor();
-            currentTime = KeQueryPerformanceCounter(NULL);
-        } while ((currentTime.QuadPart < nextPeriodTime.QuadPart) && (KernelAtomicRead(&Context->KeepRunning) == 1));
-
-        if (KernelAtomicRead(&Context->KeepRunning) == 0) {
-            break;
-        }
-
+    THREAD_PERIOD_LOOP_UNTIL_ALIVE(&nextPeriodTime, &currentTime, Context, Timestamp)
         RtlZeroMemory(idata, HARDWARE_PAYLOAD_SIZE);
-
         // CONFIGURAZIONE DEL TIMEOUT RIGIDO DEL KERNEL
         status = driver.ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
-
         if (NT_SUCCESS(status)) {
-            ULONG64 Timestamp = (currentTime.QuadPart * 1000000ULL) / Context->PerfCounterFrequency;
-
             status = CorePool_RouteMessageSrcToDest(Timestamp, HARDWARE_READER_ID, Context->TargetThreadId, idata, bytesActuallyRead);
             if (!NT_SUCCESS(status)) {
                 KdPrint(("There was an issue while attempting to send the response at time %llu\n", Timestamp));
@@ -80,9 +67,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         } else if (status == STATUS_INVALID_DEVICE_STATE) {
             KdPrint(("ERROR: there was an error on the driver state, that does not allow me to continue reading"));
         }
-        // Avanzamento rigidamente periodico calibrato a 3.33ms (3333 microsecondi)
-        nextPeriodTime.QuadPart += periodTicks;
-    }
+    THREAD_NEXT_PERIOD_AFTER_TICKS(&nextPeriodTime, periodTicks)
 
     driver.Close();
     KeRevertToUserGroupAffinityThread(&previousAffinity);

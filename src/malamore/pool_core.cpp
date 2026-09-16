@@ -4,6 +4,7 @@
 #include "malamore/driver_utility.h"
 #include "malamore/service_manager.h"
 
+#if 0
 /**
  * This ensures that the g_PoolRegistry will be still there across all the points of execution of the service
  */
@@ -60,7 +61,6 @@ VOID DiskWriterThreadRoutine(_In_ PVOID Context) {
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
-#if 0
 NTSTATUS InitializeCorePool(ULONG PercentageToUse) {
     NTSTATUS status;
     RtlZeroMemory(&g_PoolRegistry, sizeof(CorePoolRegistry));

@@ -5,6 +5,8 @@
 #ifndef MALAMORE_THREAD_POOL_H
 #define MALAMORE_THREAD_POOL_H
 
+#define MAX_POOL_CORES          (MAX_TOTAL_SLOTS)
+
 #include <malamore/threads/thread_shared.h>
 #include "malamore/structures/InterProcessChannelData.h"
 
@@ -38,13 +40,16 @@ extern "C" {
 #endif
 
 #ifdef INCLUDE_UNTESTED_FEATURES
-    NTSTATUS CorePool_InitializeRegistry();
+
     NTSTATUS CorePool_RegisterHwReader(ULONG64 processId, const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, KAFFINITY coreAffinityMask, ULONG targetTaskId);
     NTSTATUS CorePool_RegisterGenericTask(ULONG64 processId, const char* taskName, ULONG executionPeriodUs, ULONG estimatedWcetUs, KAFFINITY coreAffinityMask, ULONG targetNodeId, BOOLEAN runRead, BOOLEAN runWrite, BOOLEAN saveDisk, PFN_EXECUTE_ROUTINE_IO executionFunction);
     NTSTATUS CorePool_StartPoolExecution();
     VOID CorePool_ShutdownAndClear();
 #endif
 
+    NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse);
+    BOOL isTelemetryQueueEmpty();
+    ULONG64 usecToTicks(const ULONG64 usec);
     NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet);
     NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength);
 

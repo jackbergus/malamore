@@ -70,15 +70,17 @@ private:
 
 public:
     // Il costruttore aggancia lo slot statico del pool e la routine di riferimento
-    ThreadGuard(struct UnifiedThreadInterface* threadSlot,
-                PFN_FUTURE_THREAD_ROUTINE  routine);
+    ThreadGuard(struct UnifiedThreadInterface* threadSlot = NULL,
+                PFN_FUTURE_THREAD_ROUTINE  routine = NULL);
 
     // Il Distruttore RAII: Garantisce lo sfratto protetto automatico all'uscita dello scope
     ~ThreadGuard();
 
+    VOID Init(struct UnifiedThreadInterface* threadSlot = NULL,
+                PFN_FUTURE_THREAD_ROUTINE  routine = NULL);
+
     // Allineamento alle API Java Thread: Innesca il ciclo
     NTSTATUS Start();
-
 
     // Attesa attiva deterministica sul flag hardware
     VOID Join();

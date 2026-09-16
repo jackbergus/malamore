@@ -12,7 +12,7 @@ int main(void) {
     MalamoreIStream stream;
     MalamorePath path(L"\\\\.\\FSCC0");
 
-    if (NT_SUCCESS(stream.Open(path, StreamDisposition::OpenExisting))) {
+    if (NT_SUCCESS(stream.Open(path, StreamFlags::Read | StreamFlags::Write))) {
         char buffer[1024];
         ULONG letti = 0;
 

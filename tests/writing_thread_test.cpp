@@ -90,3 +90,39 @@ TEST_CASE("Testing so the reading and writing utility via named pipes [named pip
     // clientInputStream.Close();
     hardwarePipeServer.Close();
 }
+
+#include <malamore/wrapper_tasks/hardware_reader.h>
+
+TEST_CASE("Hardware Reader", "[thread testing]") {
+    CHAR output_buffer[1024];
+    UnifiedThreadInterface if_;
+
+    ULONG result = 0;
+
+    // --- ACCANCIO LATO SERVER ---+
+    // Il server si registra semplicemente dichiarando il suo tag nominale logico
+    Win32NamedPipeGuard hardwarePipeServer(2);
+    REQUIRE(NT_SUCCESS(hardwarePipeServer.Create(L"MalamoreInputSocket", StreamFlags::Write, sizeof(output_buffer))));
+    REQUIRE(NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected, &result)));
+    REQUIRE_FALSE(result); // At this stage, I have no connection, and therefore I should not be able to re-read it.
+
+    const MalamorePath& percorsoVerificato = hardwarePipeServer.GetPath();
+    percorsoVerificato.ToPath(if_.Context.DevicePath, sizeof(if_.Context.DevicePath));
+
+    NTSTATUS status = STATUS_SUCCESS;
+    LARGE_INTEGER freq, currentTicks;
+
+    // Cattura istantanea della costante di frequenza hardware della macchina
+    currentTicks = KeQueryPerformanceCounter(&freq);
+
+    // Calcolo della Barriera Oraria Unica Globale (Tempo Attuale + 1ms di rincorsa)
+    // Questo millisecondo fornisce il budget di tempo necessario alla CPU per completare
+    // i cambi di contesto e posizionare i thread sui core corretti prima dello scatto in fase.
+    if_.Context.PerfCounterFrequency = freq.QuadPart;
+    if_.Context.MaxBudgetUs = 200;
+    if_.Context.PeriodUs = 3333;
+    if_.Context.SynchronizedStartTicks = currentTicks.QuadPart + (static_cast<ULONG64>(5000000) * if_.Context.PerfCounterFrequency) / 1000000ULL;
+
+    ThreadGuard thread1(&if_, HardwareReaderThreadRoutine);
+
+}

@@ -9,15 +9,31 @@
 #include "malamore/utility/Path.h"
 #include "malamore/utility/telemetry_formatter.h"
 #include "malamore/utility/streambuf/MalamoreOStream.h"
+#include "malamore/wrapper_tasks/hardware_reader.h"
 
 // Allocazione statica contigua nel segmento dati (Zero heap runtime - Specifica 4)
 static CorePoolRegistry g_PoolRegistry;
-static MalamorePath     telemetryFilePath{L"\\SystemRoot\\Malamore_Telemetry_Sink.bin"};
+static MalamorePath     telemetryFilePath{L"\\SystemRoot\\Malamore_Telemetry_Sink.txt"};
 static MalamoreOStream  telemetryFile;
+static LARGE_INTEGER freq;
+static LARGE_INTEGER currentTicks;
 
-NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {
-    ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
-    InterProcessChannelData* pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
+extern "C" ULONG64 usecToTicks(const ULONG64 usec) {
+    return (static_cast<ULONG64>(usec) * freq.QuadPart) / 1000000ULL;
+}
+
+extern "C" BOOL isTelemetryQueueEmpty() {
+    return RealTimeIPC_IsEmpty(&g_PoolRegistry.TelemetryChannel) ? TRUE : FALSE;
+}
+
+extern "C" NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {
+    InterProcessChannelData* pChannel;
+    if (targetNodeId == TELEMETRY_WRITER_ID) {
+        pChannel = &g_PoolRegistry.TelemetryChannel;
+    } else {
+        ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
+        pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
+    }
 
     if (RealTimeIPC_Push(pChannel, Timestamp, SourceNodeId, PayloadData, DataLength)) {
         return STATUS_SUCCESS;
@@ -27,7 +43,7 @@ NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULON
     return STATUS_INSUFFICIENT_RESOURCES;
 }
 
-NTSTATUS CorePool_RouteMessageToDest(ULONG sourceNodeId, ULONG targetNodeId, const struct DataChannelParcel* packet) {
+extern "C" NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet) {
     ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
     InterProcessChannelData* pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
 
@@ -39,91 +55,88 @@ NTSTATUS CorePool_RouteMessageToDest(ULONG sourceNodeId, ULONG targetNodeId, con
     KdPrint(("[CorePool_RegisterGenericTask] It seems that the queue is full, and you cannot push another message \n"));
     return STATUS_INSUFFICIENT_RESOURCES;
 }
-#if INCLUDE_UNTESTED_FEATURES
 
-NTSTATUS CorePool_InitializeRegistry() {
+
+NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     NTSTATUS status;
+    // Cattura istantanea della costante di frequenza hardware della macchina
+    currentTicks = KeQueryPerformanceCounter(&freq);
 
     // Sostituito RtlZeroMemory al posto di macro non standard
     RtlZeroMemory(&g_PoolRegistry, sizeof(CorePoolRegistry));
 
-    // =========================================================================
-    // STEP 1: APERTURA O CREAZIONE SICURA DEL FILE SINK SUL DISCO DI WINDOWS
-    // =========================================================================
-    // UNICODE_STRING fileName;
-    // RtlInitUnicodeString(&fileName, L"\\SystemRoot\\Malamore_Telemetry_Sink.bin");
-    // OBJECT_ATTRIBUTES objAttr;
-    // InitializeObjectAttributes(&objAttr, &fileName, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
-    //
-    // // Esegue l'apertura sincrona ad accesso esclusivo sul file system di Ring 0
-    // IO_STATUS_BLOCK ioStatus;
-    // status = ZwCreateFile(
-    //     &g_PoolRegistry.hFileHandle,
-    //     FILE_APPEND_DATA | SYNCHRONIZE,
-    //     &objAttr,
-    //     &ioStatus,
-    //     NULL,                                       // AllocationSize
-    //     FILE_ATTRIBUTE_NORMAL,                      // FileAttributes
-    //     0,                                          // ShareAccess (0 = Esclusivo)
-    //     FILE_SUPERSEDE,                             // CreateDisposition (Sovrascrive o crea da zero)
-    //     FILE_SYNCHRONOUS_IO_NONALERT,               // CreateOptions
-    //     NULL, 0                                     // EaBuffer, EaLength
-    // );
-    //
-    // if (!NT_SUCCESS(status)) {
-    //     g_PoolRegistry.hFileHandle = NULL;
-    //     KdPrint(("[MALAMORE DRIVER] Cannot create the C:\\Windows\\Malamore_Telemetry_Sink.bin file. Quitting initialization \n"));
-    //     return STATUS_INSUFFICIENT_RESOURCES; // Fallimento catastrofico dell'I/O di tracciamento
-    // }
-    telemetryFile.Open(telemetryFilePath, StreamDisposition::OpenOrCreate);
+    ULONG activeProcessors = KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
+    if (activeProcessors < 3) {
+        KdPrint(("Error: we have just %llu processors available, we require at least 4 of them...", activeProcessors));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    ULONG coresToTarget = (activeProcessors * PercentageToUse) / 100;
+    if (coresToTarget == 0)
+        coresToTarget = 4;
 
-    RealTimeIPC_Init(&g_PoolRegistry.TelemetryChannel);
-    // g_PoolRegistry.TelemetryChannel.Init();
-
-    for (ULONG i = 0; i < MAX_GENERIC_TASKS; ++i) {
-        KdPrint(("[MALAMORE DRIVER] Init IPC  Channel #%i\n", i));
-        // g_PoolRegistry.IpcChannels[i].Init();
+    ULONG configured = 0;
+    for (ULONG i = 1; i < activeProcessors && configured < coresToTarget && configured < MAX_TOTAL_SLOTS; ++i) {
+        KAFFINITY mask = static_cast<KAFFINITY>(1) << i;
         RealTimeIPC_Init(&g_PoolRegistry.IpcChannels[i]);
+        configured++;
+        auto& slot = g_PoolRegistry.ThreadPool[configured];
+        slot.ContextA.KeepRunning = 0;
+        slot.ContextB.KeepRunning = 0;
+        slot.hThreadHandleA = NULL;
+        slot.hThreadHandleB = NULL;
+        InterlockedExchange(&slot.ContextA.KeepRunning, 0);
+        InterlockedExchange(&slot.ContextB.KeepRunning, 0);
+        slot.SlotId = i;
+        slot.BaseAffinityMask = mask;
+        slot.Type = MalamoreThreadType::THREAD_TYPE_FREE;
     }
 
+    g_PoolRegistry.CurrentHwThreadsCount = configured;
+    g_PoolRegistry.TerminateDiskThread = 0;
+
+    telemetryFile.Open(telemetryFilePath, StreamFlags::Trunc | StreamFlags::Creat | StreamFlags::Write);
+    RealTimeIPC_Init(&g_PoolRegistry.TelemetryChannel);
 
     // Configurazione dei contatori iniziali di controllo per la flotta omogenea
-    g_PoolRegistry.CurrentHwThreadsCount = 0;
     g_PoolRegistry.CurrentGenericTasksCount = 0;
     g_PoolRegistry.TotalAllocatedSlots = 0;
-
     // Armiamo lo stato del registro e resettiamo il flag di arresto della telemetria
     g_PoolRegistry.IsRegistryActive = TRUE; // TRUE
     g_PoolRegistry.TerminateDiskThread = 0;
 
-    // =========================================================================
-    // STEP 4: AVVIO DEL THREAD PARALLELO A PRIORITÀ PASSIVA DEL DISK WRITER
-    // =========================================================================
-    // Crea il System Thread di background vincolato al processo protetto "System"
-    KdPrint(("[MALAMORE DRIVER] Creating telemetry thread\n"));
-    status = PsCreateSystemThread(
-        &g_PoolRegistry.hDiskThread,     // _Out_ PHANDLE ThreadHandle
-        THREAD_ALL_ACCESS,               // _In_ ACCESS_MASK DesiredAccess
-        NULL,                            // _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes
-        NULL,                            // _In_opt_ HANDLE ProcessHandle (NULL = System Process)
-        NULL,                            // _Out_opt_ PCLIENT_ID ClientId
-        DiskWriterThreadRoutine,         // _In_ PKSTART_ROUTINE StartRoutine
-        NULL                             // _In_opt_ PVOID StartContext
-    );
-
-    if (!NT_SUCCESS(status)) {
-        // Se lo spawn fallisce, esegue il rollback chiudendo l'handle del file aperto
-        ZwClose(g_PoolRegistry.hFileHandle);
-        g_PoolRegistry.hFileHandle = NULL;
-        g_PoolRegistry.hDiskThread = NULL;
-        g_PoolRegistry.IsRegistryActive = FALSE;
-        KdPrint(("[MALAMORE DRIVER] Not enough resources to create the telemetry thread\n"));
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
+    // TODO:
+    // // =========================================================================
+    // // STEP 4: AVVIO DEL THREAD PARALLELO A PRIORITÀ PASSIVA DEL DISK WRITER
+    // // =========================================================================
+    // // Crea il System Thread di background vincolato al processo protetto "System"
+    // KdPrint(("[MALAMORE DRIVER] Creating telemetry thread\n"));
+    // status = PsCreateSystemThread(
+    //     &g_PoolRegistry.hDiskThread,     // _Out_ PHANDLE ThreadHandle
+    //     THREAD_ALL_ACCESS,               // _In_ ACCESS_MASK DesiredAccess
+    //     NULL,                            // _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes
+    //     NULL,                            // _In_opt_ HANDLE ProcessHandle (NULL = System Process)
+    //     NULL,                            // _Out_opt_ PCLIENT_ID ClientId
+    //     DiskWriterThreadRoutine,         // _In_ PKSTART_ROUTINE StartRoutine
+    //     NULL                             // _In_opt_ PVOID StartContext
+    // );
+    //
+    // if (!NT_SUCCESS(status)) {
+    //     // Se lo spawn fallisce, esegue il rollback chiudendo l'handle del file aperto
+    //     ZwClose(g_PoolRegistry.hFileHandle);
+    //     g_PoolRegistry.hFileHandle = NULL;
+    //     g_PoolRegistry.hDiskThread = NULL;
+    //     g_PoolRegistry.IsRegistryActive = FALSE;
+    //     KdPrint(("[MALAMORE DRIVER] Not enough resources to create the telemetry thread\n"));
+    //     return STATUS_INSUFFICIENT_RESOURCES;
+    // }
 
     // Ritorna il successo: l'infrastruttura statica è pronta a ricevere le registrazioni dei nodi
     return STATUS_SUCCESS;
 }
+
+#if INCLUDE_UNTESTED_FEATURES
+
+
 
 
 

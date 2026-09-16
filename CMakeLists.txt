@@ -84,7 +84,6 @@ wdk_add_driver(${DRIVER_NAME}
         WINVER ${WDK_WINVER}
         simple_driver.cpp
         src/malamore/thread_generic_polling.cpp
-        src/malamore/pool_core.cpp
         src/malamore/service_manager.cpp
         src/malamore/ipc_manager.cpp
         src/tasks/task_lettura.c     # <--- QUI AGGIUNGI IL TUO FILE C
@@ -203,6 +202,7 @@ add_library(user_level_struct_library OBJECT
         src/malamore/utility/streambuf/MalamoreOStream.cpp
         src/malamore/threads/thread_pool.cpp
         src/malamore/wrapper_tasks/hardware_reader.cpp
+        src/malamore/wrapper_tasks/telemetry_writer.cpp
         src/malamore/winapi_client/Win32NamedPipeGuard.cpp
         src/malamore/utility/streambuf/MalamoreIOStream.cpp
 )
