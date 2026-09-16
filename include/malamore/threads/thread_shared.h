@@ -50,7 +50,7 @@ struct UnifiedThreadContext {
     ULONG64 PhaseOffsetTicks;
 
     ULONG   PeriodUs;
-    ULONG   MaxBudgetUs;
+    ULONG   MaxBudgetUs;                // This works as a ReadTimeout for the Hardware Reader
     ULONG64 PerfCounterFrequency;
 
     volatile LONG IsHighPriority;

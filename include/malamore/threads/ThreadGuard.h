@@ -26,7 +26,7 @@ struct FutureResultParcel {
 };
 
 // Firma aggiornata della routine computazionale Real-Time del tandem o dell'I/O
-typedef void (*PFN_FUTURE_THREAD_ROUTINE)(PVOID Context, struct FutureResultParcel* OutResult);
+typedef void (*PFN_FUTURE_THREAD_ROUTINE)(struct UnifiedThreadContext* Context, struct FutureResultParcel* OutResult);
 
 struct ThreadBridgePayload {
     struct UnifiedThreadInterface* Slot;

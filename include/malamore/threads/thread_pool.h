@@ -37,19 +37,21 @@ struct CorePoolRegistry {
 extern "C" {
 #endif
 
+#ifdef INCLUDE_UNTESTED_FEATURES
     NTSTATUS CorePool_InitializeRegistry();
     NTSTATUS CorePool_RegisterHwReader(ULONG64 processId, const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, KAFFINITY coreAffinityMask, ULONG targetTaskId);
     NTSTATUS CorePool_RegisterGenericTask(ULONG64 processId, const char* taskName, ULONG executionPeriodUs, ULONG estimatedWcetUs, KAFFINITY coreAffinityMask, ULONG targetNodeId, BOOLEAN runRead, BOOLEAN runWrite, BOOLEAN saveDisk, PFN_EXECUTE_ROUTINE_IO executionFunction);
     NTSTATUS CorePool_StartPoolExecution();
     VOID CorePool_ShutdownAndClear();
+#endif
+
     NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet);
+    NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength);
 
 #ifdef __cplusplus
 }
 #endif
 
-static __inline LONG KernelAtomicRead(volatile LONG* Target) {
-    return InterlockedOr(const_cast<LONG*>(Target), 0);
-}
+
 
 #endif //MALAMORE_THREAD_POOL_H

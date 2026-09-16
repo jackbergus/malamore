@@ -11,7 +11,8 @@
 #pragma once
 // #include "malamore/ipc_manager.h"
 
-#define HARDWARE_PAYLOAD_SIZE 512
+#define HARDWARE_PAYLOAD_SIZE       (512)
+#define HARDWARE_READER_ID          (ULONG_MAX-1)
 
 #pragma pack(push, 1)
 // Contesto operativo del Thread di Lettura Hardware a PASSIVE_LEVEL
@@ -40,7 +41,7 @@ struct HWTaskContext {
 extern "C" {
 #endif
 
-    VOID HardwareReaderThreadRoutine(_In_ PVOID Context);
+    VOID HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct FutureResultParcel* OutResult);
 
 #ifdef __cplusplus
 }

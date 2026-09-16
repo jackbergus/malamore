@@ -17,7 +17,7 @@ MalamoreOStream::~MalamoreOStream() {
     if (m_IsOpen) Close();
 }
 
-NTSTATUS MalamoreOStream::Open(const MalamorePath& path, StreamDisposition disposition) {
+NTSTATUS MalamoreOStream::Open(const MalamorePath& path, ULONG flags) {
     if (m_IsOpen) return STATUS_SUCCESS;
     if (path.empty()) return STATUS_INVALID_PARAMETER;
 
@@ -32,11 +32,37 @@ NTSTATUS MalamoreOStream::Open(const MalamorePath& path, StreamDisposition dispo
     RtlInitUnicodeString(&m_UnicodePath, m_SavedPath);
     InitializeObjectAttributes(&objAttr, &m_UnicodePath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
 
-    ULONG nativeDisposition = 0x00000002; // Default FILE_SUPERSEDE
-    if (disposition == StreamDisposition::OpenExisting) nativeDisposition = 0x00000001;
-    else if (disposition == StreamDisposition::OpenOrCreate) nativeDisposition = 0x00000003;
+    // =========================================================================
+    // MOTORE DI TRADUZIONE: DA LOGICA BITMASK POSIX A STRATO HARDWARE WINDOWS NT
+    // =========================================================================
+    ACCESS_MASK desiredAccess = SYNCHRONIZE;
+    ULONG nativeDisposition = 0;
 
-    status = ZwCreateFile(&hFile, FILE_APPEND_DATA | SYNCHRONIZE, &objAttr, &ioStatus, NULL,
+    // 1. ISOLAMENTO DEI DIRITTI DI ACCESSO HARDWARE
+    // L'append ha la priorità assoluta di mascheramento; se manca, si commuta in scrittura ordinaria
+    if (flags & StreamFlags::Append) {
+        desiredAccess |= FILE_APPEND_DATA;
+    } else if (flags & StreamFlags::Write) {
+        desiredAccess |= FILE_WRITE_DATA;
+    }
+    if (flags & StreamFlags::Read) {
+        desiredAccess |= GENERIC_READ;
+    }
+
+    // 2. ISOLAMENTO DEL TRONCAMENTO E CREAZIONE (FILE_SUPERSEDE FIX)
+    if (flags & StreamFlags::Trunc) {
+        // Se l'utente richiede esplicitamente il troncamento (Trunc), forziamo FILE_SUPERSEDE (0).
+        // Questo garantisce che Windows NT riduca istantaneamente la dimensione del file a 0 byte.
+        nativeDisposition = 0; // 0x00000000 = FILE_SUPERSEDE nel WDK
+    } else if (flags & StreamFlags::Creat) {
+        // Se vuole creare ma senza azzerare, si passa ad open-or-create (FILE_OPEN_IF)
+        nativeDisposition = 3; // 0x00000003 = FILE_OPEN_IF nel WDK
+    } else {
+        // Altrimenti il file deve esistere obbligatoriamente
+        nativeDisposition = 1; // 0x00000001 = FILE_OPEN nel WDK
+    }
+
+    status = ZwCreateFile(&hFile, desiredAccess, &objAttr, &ioStatus, NULL,
                           FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, nativeDisposition, FILE_NON_DIRECTORY_FILE, NULL, 0);
 
     if (NT_SUCCESS(status)) {

@@ -190,7 +190,8 @@ add_custom_target(CertificaDriver ALL
         COMMENT "Pipeline di certificazione completata con successo!"
 )
 
-
+### This library provides the support for enabling objects also at the user level, not necessarily at the kernel level
+### This should help with the debugging facility.
 add_library(user_level_struct_library OBJECT
         src/malamore/structures/InterProcessChannelData.cpp
         src/malamore/structures/MessageMap.cpp
@@ -200,6 +201,8 @@ add_library(user_level_struct_library OBJECT
         src/malamore/utility/streambuf/KernelStreamBuf.cpp
         src/malamore/utility/streambuf/MalamoreIStream.cpp
         src/malamore/utility/streambuf/MalamoreOStream.cpp
+        src/malamore/threads/thread_pool.cpp
+        src/malamore/wrapper_tasks/hardware_reader.cpp
 )
 
 add_executable(writing_thread_test tests/writing_thread_test.cpp)

@@ -10,7 +10,7 @@
 
 #include "malamore/structures/InterProcessChannelData.h"
 #include "malamore/utility/Path.h"
-#include "malamore/utility/KernelStream.h"
+#include "malamore/utility/StdStream.h"
 
 TEST_CASE("InterProcessChannelData") {
     InterProcessChannelData buffer;
@@ -110,7 +110,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
 
     {
         MalamoreOStream file_output{};
-        REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamDisposition::CreateAlways)));
+        REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamFlags::Creat | StreamFlags::Trunc | StreamFlags::Write)));
 
         file_output << "this is a new line" << "\n";
         file_output << "this is yet another line" << "\n";
@@ -119,7 +119,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
     {
         char buffer[1024];
         MalamoreIStream file_input{};
-        REQUIRE(NT_SUCCESS(file_input.Open(some_file_path)));
+        REQUIRE(NT_SUCCESS(file_input.Open(some_file_path, StreamFlags::Read)));
 
         file_input.GetLine(buffer, sizeof(buffer));
         REQUIRE(strcmp(buffer, "this is a new line") == 0);
@@ -127,6 +127,24 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
         REQUIRE(strcmp(buffer, "this is yet another line") == 0);
     }
 
+    {
+        MalamoreOStream file_output{};
+        REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamFlags::Append | StreamFlags::Write)));
 
+        file_output << "this is the last and appended line" << "\n";
+    }
+
+    {
+        char buffer[1024];
+        MalamoreIStream file_input{};
+        REQUIRE(NT_SUCCESS(file_input.Open(some_file_path, StreamFlags::Read)));
+
+        file_input.GetLine(buffer, sizeof(buffer));
+        REQUIRE(strcmp(buffer, "this is a new line") == 0);
+        file_input.GetLine(buffer, sizeof(buffer));
+        REQUIRE(strcmp(buffer, "this is yet another line") == 0);
+        file_input.GetLine(buffer, sizeof(buffer));
+        REQUIRE(strcmp(buffer, "this is the last and appended line") == 0);
+    }
 
 }

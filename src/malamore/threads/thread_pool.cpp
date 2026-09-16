@@ -4,30 +4,42 @@
 
 #include <malamore/service_manager.h>
 #include <malamore/threads/thread_pool.h>
-#include <ntstrsafe.h> // <--- NUOVO: Routine di manipolazione stringhe sicure nativamente in Ring 0
+// #include <ntstrsafe.h> // <--- NUOVO: Routine di manipolazione stringhe sicure nativamente in Ring 0
 
+#include "malamore/utility/Path.h"
 #include "malamore/utility/telemetry_formatter.h"
+#include "malamore/utility/streambuf/MalamoreOStream.h"
 
 // Allocazione statica contigua nel segmento dati (Zero heap runtime - Specifica 4)
 static CorePoolRegistry g_PoolRegistry;
+static MalamorePath     telemetryFilePath{L"\\SystemRoot\\Malamore_Telemetry_Sink.bin"};
+static MalamoreOStream  telemetryFile;
 
-// Dichiarazione esterna delle funzioni dei System Thread del driver per il linkage
-extern "C" VOID HardwareReaderThreadRoutine(_In_ PVOID Context);
-extern "C" VOID CorePollingRoutineGeneric(_In_ PVOID Context);
+NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {
+    ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
+    InterProcessChannelData* pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
 
-// Dichiarazione esterna della routine a priorità passiva del Disk Writer
-extern "C" VOID DiskWriterThreadRoutine(_In_ PVOID Context);
+    if (RealTimeIPC_Push(pChannel, Timestamp, SourceNodeId, PayloadData, DataLength)) {
+        return STATUS_SUCCESS;
+    }
+
+    KdPrint(("[CorePool_RegisterGenericTask] It seems that the queue is full, and you cannot push another message \n"));
+    return STATUS_INSUFFICIENT_RESOURCES;
+}
+
+NTSTATUS CorePool_RouteMessageToDest(ULONG sourceNodeId, ULONG targetNodeId, const struct DataChannelParcel* packet) {
+    ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
+    InterProcessChannelData* pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
 
 
-/***
- *
- *
-*Forcing Release Behavior ManuallyIf you want to ensure KdPrint is entirely disabled regardless of the build environment,
-*verify that DBG is not defined in your preprocessor settings. You can also explicitly undefine it in your main header
-*wrapper:c #undef DBG
-// Now any subsequent include of wdm.h or ntddk.h
-// will evaluate KdPrint(...) to an empty statement.
-*/
+    if (RealTimeIPC_Push(pChannel, packet)) {
+        return STATUS_SUCCESS;
+    }
+
+    KdPrint(("[CorePool_RegisterGenericTask] It seems that the queue is full, and you cannot push another message \n"));
+    return STATUS_INSUFFICIENT_RESOURCES;
+}
+#if INCLUDE_UNTESTED_FEATURES
 
 NTSTATUS CorePool_InitializeRegistry() {
     NTSTATUS status;
@@ -38,32 +50,32 @@ NTSTATUS CorePool_InitializeRegistry() {
     // =========================================================================
     // STEP 1: APERTURA O CREAZIONE SICURA DEL FILE SINK SUL DISCO DI WINDOWS
     // =========================================================================
-    UNICODE_STRING fileName;
-    RtlInitUnicodeString(&fileName, L"\\SystemRoot\\Malamore_Telemetry_Sink.bin");
-
-    OBJECT_ATTRIBUTES objAttr;
-    InitializeObjectAttributes(&objAttr, &fileName, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
-
-    // Esegue l'apertura sincrona ad accesso esclusivo sul file system di Ring 0
-    IO_STATUS_BLOCK ioStatus;
-    status = ZwCreateFile(
-        &g_PoolRegistry.hFileHandle,
-        FILE_APPEND_DATA | SYNCHRONIZE,
-        &objAttr,
-        &ioStatus,
-        NULL,                                       // AllocationSize
-        FILE_ATTRIBUTE_NORMAL,                      // FileAttributes
-        0,                                          // ShareAccess (0 = Esclusivo)
-        FILE_SUPERSEDE,                             // CreateDisposition (Sovrascrive o crea da zero)
-        FILE_SYNCHRONOUS_IO_NONALERT,               // CreateOptions
-        NULL, 0                                     // EaBuffer, EaLength
-    );
-
-    if (!NT_SUCCESS(status)) {
-        g_PoolRegistry.hFileHandle = NULL;
-        KdPrint(("[MALAMORE DRIVER] Cannot create the C:\\Windows\\Malamore_Telemetry_Sink.bin file. Quitting initialization \n"));
-        return STATUS_INSUFFICIENT_RESOURCES; // Fallimento catastrofico dell'I/O di tracciamento
-    }
+    // UNICODE_STRING fileName;
+    // RtlInitUnicodeString(&fileName, L"\\SystemRoot\\Malamore_Telemetry_Sink.bin");
+    // OBJECT_ATTRIBUTES objAttr;
+    // InitializeObjectAttributes(&objAttr, &fileName, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
+    //
+    // // Esegue l'apertura sincrona ad accesso esclusivo sul file system di Ring 0
+    // IO_STATUS_BLOCK ioStatus;
+    // status = ZwCreateFile(
+    //     &g_PoolRegistry.hFileHandle,
+    //     FILE_APPEND_DATA | SYNCHRONIZE,
+    //     &objAttr,
+    //     &ioStatus,
+    //     NULL,                                       // AllocationSize
+    //     FILE_ATTRIBUTE_NORMAL,                      // FileAttributes
+    //     0,                                          // ShareAccess (0 = Esclusivo)
+    //     FILE_SUPERSEDE,                             // CreateDisposition (Sovrascrive o crea da zero)
+    //     FILE_SYNCHRONOUS_IO_NONALERT,               // CreateOptions
+    //     NULL, 0                                     // EaBuffer, EaLength
+    // );
+    //
+    // if (!NT_SUCCESS(status)) {
+    //     g_PoolRegistry.hFileHandle = NULL;
+    //     KdPrint(("[MALAMORE DRIVER] Cannot create the C:\\Windows\\Malamore_Telemetry_Sink.bin file. Quitting initialization \n"));
+    //     return STATUS_INSUFFICIENT_RESOURCES; // Fallimento catastrofico dell'I/O di tracciamento
+    // }
+    telemetryFile.Open(telemetryFilePath, StreamDisposition::OpenOrCreate);
 
     RealTimeIPC_Init(&g_PoolRegistry.TelemetryChannel);
     // g_PoolRegistry.TelemetryChannel.Init();
@@ -112,6 +124,29 @@ NTSTATUS CorePool_InitializeRegistry() {
     // Ritorna il successo: l'infrastruttura statica è pronta a ricevere le registrazioni dei nodi
     return STATUS_SUCCESS;
 }
+
+
+
+
+
+// Dichiarazione esterna delle funzioni dei System Thread del driver per il linkage
+extern "C" VOID HardwareReaderThreadRoutine(_In_ PVOID Context);
+extern "C" VOID CorePollingRoutineGeneric(_In_ PVOID Context);
+
+// Dichiarazione esterna della routine a priorità passiva del Disk Writer
+extern "C" VOID DiskWriterThreadRoutine(_In_ PVOID Context);
+
+
+/***
+ *
+ *
+*Forcing Release Behavior ManuallyIf you want to ensure KdPrint is entirely disabled regardless of the build environment,
+*verify that DBG is not defined in your preprocessor settings. You can also explicitly undefine it in your main header
+*wrapper:c #undef DBG
+// Now any subsequent include of wdm.h or ntddk.h
+// will evaluate KdPrint(...) to an empty statement.
+*/
+
 
 
 // SPECIFICA 2: Metodo dedicato all'inizializzazione del thread Hardware
@@ -503,3 +538,4 @@ VOID CorePool_ShutdownAndClear() {
     g_PoolRegistry.CurrentHwThreadsCount = 0;
     g_PoolRegistry.CurrentGenericTasksCount = 0;
 }
+#endif

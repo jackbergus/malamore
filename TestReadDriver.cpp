@@ -2,7 +2,7 @@
 // Created by Giacomo Bergami on 16/09/2026.
 //
 
-#include "malamore/utility/KernelStream.h"
+#include "malamore/utility/StdStream.h"
 
 /**
  * This main function is mainly done to check whether I can read something from the stream.

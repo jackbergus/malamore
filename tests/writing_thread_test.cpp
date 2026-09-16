@@ -12,7 +12,7 @@
 #include "malamore/threads/ThreadGuard.h"
 
 
-VOID bogus_task(PVOID Context, struct FutureResultParcel* OutResult) {
+VOID bogus_task(struct UnifiedThreadContext* Context, struct FutureResultParcel* OutResult) {
     if (OutResult) {
         *((uint32_t*)OutResult->DataBuffer) = (uint32_t)123456;
         OutResult->DataLength = sizeof(uint32_t);

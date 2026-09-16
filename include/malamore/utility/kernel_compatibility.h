@@ -61,6 +61,8 @@
 #define FALSE (0)
 #endif
 
+
+
 // ALLINEAMENTO COMPLETO DEI CODICI SIMBOLICI NTSTATUS DI RIFERIMENTO
     #ifndef STATUS_SUCCESS
         #define STATUS_SUCCESS                  ((NTSTATUS)0x00000000L)
@@ -126,6 +128,36 @@
 
 #ifndef OBJ_KERNEL_HANDLE
     #define OBJ_KERNEL_HANDLE             0x00000200L
+#endif
+
+#ifndef FILE_SHARE_READ
+#define FILE_SHARE_READ               0x00000001
+#endif
+
+#ifndef FILE_OPEN_IF
+#define FILE_OPEN_IF                  0x00000003
+#endif
+
+#ifndef FILE_NON_DIRECTORY_FILE
+#define FILE_NON_DIRECTORY_FILE       0x00000040
+#endif
+
+#ifndef FILE_ATTRIBUTE_NORMAL
+#define FILE_ATTRIBUTE_NORMAL         0x00000080
+#endif
+
+
+#define FILE_APPEND_DATA              0x00000004
+#define FILE_WRITE_DATA               0x00000002
+
+#ifndef FILE_SUPERSEDE
+#define FILE_SUPERSEDE            0x00000000 // Valore reale nel WDK
+#endif
+#ifndef FILE_OPEN
+#define FILE_OPEN                 0x00000001 // Valore reale nel WDK
+#endif
+#ifndef FILE_OPEN_IF
+#define FILE_OPEN_IF              0x00000003 // Valore reale nel WDK
 #endif
 
 #ifndef PKSTART_ROUTINE
@@ -252,29 +284,28 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         UNREFERENCED_PARAMETER(CreateOptions);
         UNREFERENCED_PARAMETER(EaBuffer);
         UNREFERENCED_PARAMETER(EaLength);
-
-        if (FileHandle == NULL || ObjectAttributes == NULL || ObjectAttributes->ObjectName == NULL || IoStatusBlock == NULL) {
+        if (FileHandle == NULL || ObjectAttributes == NULL || ObjectAttributes->ObjectName == NULL || IoStatusBlock == NULL)
             return STATUS_INVALID_PARAMETER;
-        }
 
-        // Converte la stringa di Ring 0 in un percorso Win32 comprensibile
         PCWSTR win32Path = ParseKernelPathToWin32(ObjectAttributes->ObjectName->Buffer);
 
-        // Mappatura grossolana del CreateDisposition del Kernel su Win32
-        DWORD creationDisposition = OPEN_ALWAYS; // Equivalente di sicurezza generico
-        if (CreateDisposition == 0x00000001) creationDisposition = OPEN_EXISTING; // FILE_OPEN
-        else if (CreateDisposition == 0x00000002) creationDisposition = CREATE_ALWAYS; // FILE_CREATE / SUPERSEDE
+        // CORREZIONE HARDWARE: Mappatura millimetrica e fedele dei codici di Ring 0 su Win32
+        DWORD creationDisposition = OPEN_EXISTING; // Default di sicurezza fallimentare
 
-        HANDLE hFile = CreateFileW(
-            win32Path,
-            DesiredAccess,
-            ShareAccess,
-            NULL,
-            creationDisposition,
-            FileAttributes,
-            NULL
-        );
+        if (CreateDisposition == 0) {
+            // 0x00000000 = FILE_SUPERSEDE -> Sovrascrive interamente azzerando i settori
+            creationDisposition = CREATE_ALWAYS;
+        }
+        else if (CreateDisposition == 1) {
+            // 0x00000001 = FILE_OPEN -> Apre esistente, fallisce se manca
+            creationDisposition = OPEN_EXISTING;
+        }
+        else if (CreateDisposition == 3) {
+            // 0x00000003 = FILE_OPEN_IF -> Apre se c'è, crea se manca (senza distruggere i dati)
+            creationDisposition = OPEN_ALWAYS;
+        }
 
+        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
@@ -420,6 +451,42 @@ inline void KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State) {
     }
 }
 
+// Risolutivo per KeResetEvent richiesto: Abbassa la sbarra di sincronizzazione Win32
+inline void KeResetEvent(PKEVENT Event) {
+    if (Event && Event->Handle) ResetEvent(Event->Handle);
+}
+
+// Risolutivo per KeQueryPerformanceCounter: Interroga i tick orari della CPU ad alta precisione
+inline LARGE_INTEGER KeQueryPerformanceCounter(PLARGE_INTEGER PerformanceFrequency) {
+    LARGE_INTEGER count;
+    QueryPerformanceCounter(&count);
+    if (PerformanceFrequency != NULL) {
+        QueryPerformanceFrequency(PerformanceFrequency);
+    }
+    return count;
+}
+
+
+// Risolutivo per KeSetSystemGroupAffinityThread: Sega l'I/O ed isola il thread sul core logico
+inline void KeSetSystemGroupAffinityThread(PGROUP_AFFINITY Affinity, PGROUP_AFFINITY PreviousAffinity) {
+    if (Affinity != nullptr) {
+        HANDLE hCurrentThread = GetCurrentThread();
+        DWORD_PTR oldMask = SetThreadAffinityMask(hCurrentThread, static_cast<DWORD_PTR>(Affinity->Mask));
+        if (PreviousAffinity != nullptr) {
+            PreviousAffinity->Mask = static_cast<KAFFINITY>(oldMask);
+            PreviousAffinity->Group = 0;
+        }
+    }
+}
+
+
+// Risolutivo per KeRevertToUserGroupAffinityThread: Ripristina il gruppo originario
+inline void KeRevertToUserGroupAffinityThread(PGROUP_AFFINITY PreviousAffinity) {
+    if (PreviousAffinity != nullptr) {
+        SetThreadAffinityMask(GetCurrentThread(), static_cast<DWORD_PTR>(PreviousAffinity->Mask));
+    }
+}
+
 inline NTSTATUS KeWaitForSingleObject(PVOID Object, char WaitReason, char WaitMode, BOOLEAN Alertable, LARGE_INTEGER* Timeout) {
     UNREFERENCED_PARAMETER(WaitReason);
     UNREFERENCED_PARAMETER(WaitMode);
@@ -487,11 +554,16 @@ inline const char* NtStatusToString(NTSTATUS status) {
     }
 }
 
+
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif
 
+static __inline LONG KernelAtomicRead(volatile LONG* Target) {
+    return InterlockedOr(const_cast<LONG*>(Target), 0);
+}
 
 #endif //MALAMORE_KERNEL_COMPATIBILITY_H

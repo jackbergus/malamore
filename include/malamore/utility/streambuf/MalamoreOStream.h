@@ -9,16 +9,23 @@
 //
 
 // #pragma once
+#include <malamore/utility/streambuf/StreamFlags.h>
 #include "malamore/utility/streambuf/KernelStreamBuf.h"
 #include "malamore/utility/Path.h"
 
 #ifdef __cplusplus
 
-enum class StreamDisposition : ULONG {
-    OpenExisting = 1,  // FILE_OPEN
-    CreateAlways = 2,  // FILE_SUPERSEDE
-    OpenOrCreate = 3   // FILE_OPEN_IF
-};
+// enum class StreamDisposition : ULONG {
+//     OpenExisting = 1,  // FILE_OPEN
+//     CreateAlways = 2,  // FILE_SUPERSEDE
+//     OpenOrCreate = 3   // FILE_OPEN_IF
+// };
+//
+// // 2. LE MODALITÀ DI ACCESSO HARDWARE IN SCRITTURA
+// enum class StreamAccess : ULONG {
+//     WriteOnly = 1,     // FILE_WRITE_DATA  (Scrittura classica ad offset)
+//     AppendOnly = 2     // FILE_APPEND_DATA (Scrittura atomica sempre in coda)
+// };
 
 class MalamoreOStream {
 private:
@@ -35,7 +42,7 @@ public:
     MalamoreOStream();
     ~MalamoreOStream();
 
-    NTSTATUS Open(const MalamorePath& path, StreamDisposition disposition);
+    NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
     BOOLEAN IsOpen() const { return m_IsOpen; }
 

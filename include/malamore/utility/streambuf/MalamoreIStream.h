@@ -9,7 +9,8 @@
 // Created by Giacomo Bergami on 16/09/2026.
 //
 
-#pragma once
+// #pragma once
+#include <malamore/utility/streambuf/StreamFlags.h>
 #include "malamore/utility/streambuf/KernelStreamBuf.h"
 #include "malamore/utility/Path.h"
 #include "malamore/utility/streambuf/MalamoreOStream.h" // Per agganciare StreamDisposition
@@ -27,7 +28,7 @@ public:
     MalamoreIStream();
     ~MalamoreIStream();
 
-    NTSTATUS Open(const MalamorePath& path, StreamDisposition disposition = StreamDisposition::OpenExisting);
+    NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
     BOOLEAN IsOpen() const { return m_IsOpen; }
 
