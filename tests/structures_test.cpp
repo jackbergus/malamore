@@ -10,6 +10,7 @@
 
 #include "malamore/structures/InterProcessChannelData.h"
 #include "malamore/utility/Path.h"
+#include "malamore/utility/KernelStream.h"
 
 TEST_CASE("InterProcessChannelData") {
     InterProcessChannelData buffer;
@@ -101,4 +102,31 @@ TEST_CASE("FileSystemPath [case]") {
         // -> La CreateFileW simulata troverà la cartella fisica reale su C: ed eseguirà i log.
         REQUIRE(strcmp((const char*)targetBuffer, (const char*)L"C:\\Windows\\Malamore_Telemetry_Sink.bin") == 0);
     }
+}
+
+
+TEST_CASE("FILE WRITING AND READING [casusu]") {
+    MalamorePath some_file_path((WCHAR*)L"my_file.txt");
+
+    {
+        MalamoreOStream file_output{};
+        REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamDisposition::CreateAlways)));
+
+        file_output << "this is a new line" << "\n";
+        file_output << "this is yet another line" << "\n";
+    }
+
+    {
+        char buffer[1024];
+        MalamoreIStream file_input{};
+        REQUIRE(NT_SUCCESS(file_input.Open(some_file_path)));
+
+        file_input.GetLine(buffer, sizeof(buffer));
+        REQUIRE(strcmp(buffer, "this is a new line") == 0);
+        file_input.GetLine(buffer, sizeof(buffer));
+        REQUIRE(strcmp(buffer, "this is yet another line") == 0);
+    }
+
+
+
 }

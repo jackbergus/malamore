@@ -354,6 +354,17 @@ inline NTSTATUS ZwClose(HANDLE Handle) {
 #define KeMemoryBarrier()                   MemoryBarrier()
 #endif
 
+inline
+NTSTATUS ConvertAnsiToWideStatic(const char* ansiSrc, WCHAR* wideDest, size_t destCch) {
+    if (ansiSrc == nullptr || wideDest == nullptr || destCch == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Il flag %S (maiuscolo) esegue la traslazione automatica da char* a WCHAR*
+    // all'interno del buffer statico dello stack, a costo zero a runtime.
+    return RtlStringCchPrintfW(wideDest, destCch, L"%S", ansiSrc);
+}
+
 #endif
 
 
