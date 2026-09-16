@@ -107,6 +107,11 @@ typedef DWORD (WINAPI *PKSTART_ROUTINE)(LPVOID lpThreadParameter);
         #define UNREFERENCED_PARAMETER(P) (void)(P)
     #endif
 
+// RISOLUTIVO: Specifica la maschera nativa di Ring 0 per impedire l'apertura di directory
+#ifndef FILE_NON_DIRECTORY_FILE
+#define FILE_NON_DIRECTORY_FILE   0x00000040 // <--- AGGIUNTO PER LA COMPILAZIONE DI KERNELSTREAM
+#endif
+
     // Strutture Kernel simulate a Ring 3
     struct UNICODE_STRING {
         unsigned short Length;
@@ -167,6 +172,12 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
     #define RtlStringCchPrintfA                     StringCchPrintfA
     #define RtlStringCchLengthA                     StringCchLengthA
     #define KdPrint(FormatAndArgs)                  printf FormatAndArgs
+    #define RtlStringCchCopyA                       StringCchCopyA
+    #define RtlStringCchCopyW                       StringCchCopyW // <--- RISOLUTIVO PER KERNELSTREAM!
+    #define RtlStringCchLengthW                     StringCchLengthW // <--- PERFETTAMENTE RISOLTO ADESSO!
+    #define RtlStringCchCatW                        StringCchCatW // <--- ABILITATO E RISOLTO ADESSO!
+    #define RtlStringCchPrintfW                     StringCchPrintfW // <--- RISOLUTIVO: Abilitato ora per MalamorePath!
+
 
     // 4. Simulazione delle routine del ciclo di vita dei Thread e File di Ring 0
     #define PsTerminateSystemThread(Status)         ExitThread((DWORD)(Status))

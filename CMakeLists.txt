@@ -196,6 +196,8 @@ add_library(user_level_struct_library OBJECT
         src/malamore/structures/MessageMap.cpp
         src/malamore/structures/TelemetryQueue.cpp
         src/malamore/threads/ThreadGuard.cpp
+        src/malamore/utility/Path.cpp
+        src/malamore/utility/KernelStream.cpp
 )
 
 add_executable(writing_thread_test tests/writing_thread_test.cpp)
