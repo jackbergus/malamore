@@ -57,4 +57,5 @@ public:
 };
 
 inline MalamoreIOStream& endl(MalamoreIOStream& os) { os << "\r\n"; return os; }
+inline MalamoreIOStream& sflush(MalamoreIOStream& os) { os.Flush(); return os; }
 #endif

@@ -68,16 +68,23 @@ TEST_CASE("Testing so the reading and writing utility via named pipes [named pip
 
     // Se non ho ancora scritto niente all'interno della pipe, rimango comunque in attesa bloccante
     ULONG actuallyRead = 0;
-    auto status = clientStream.ReadWithTimeout(output_buffer, sizeof(output_buffer), 3000000, &actuallyRead);
+    NTSTATUS status = clientStream.ReadWithTimeout(output_buffer, sizeof(output_buffer), 3000000, &actuallyRead);
     REQUIRE(status == STATUS_TIMEOUT);
 
     // Altrimenti, dovrei essere in grado di scrivere qualcosa sulla pipe, e poi leggerla qui di nuovo
-    clientStream << "hello, world!" << endl;
-    clientStream.Flush();
-    REQUIRE(result); // At the first write, I should be able to connect and read
+    clientStream << "hello, world!" << sflush;
+    // REQUIRE(result); // At the first write, I should be able to connect and read
 
+    RtlZeroMemory(output_buffer, sizeof(output_buffer));
+    REQUIRE(NT_SUCCESS(hardwarePipeServer.Read(output_buffer, sizeof(output_buffer), &actuallyRead)));
+    REQUIRE(strcmp(output_buffer, "hello, world!") == 0);
+    REQUIRE(strlen("hello, world!") == actuallyRead);
 
-    clientStream.GetLine(output_buffer, sizeof(output_buffer));
+    REQUIRE(NT_SUCCESS(hardwarePipeServer.Write("This is some new text, forsooth!\n", strlen("This is some new text, forsooth!\n"), &actuallyRead)));
+    REQUIRE(strlen("This is some new text, forsooth!\n") == actuallyRead);
+
+    REQUIRE(clientStream.GetLine(output_buffer, sizeof(output_buffer)) == actuallyRead-1);
+    REQUIRE(strcmp(output_buffer, "This is some new text, forsooth!") == 0);
 
     clientStream.Close();
     // clientInputStream.Close();

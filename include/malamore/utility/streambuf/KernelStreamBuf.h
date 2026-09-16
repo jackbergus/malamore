@@ -43,7 +43,23 @@ public:
     // Primitive di lettura del buffer
     int Sgetc(); // Ritorna il carattere corrente o -1 (EOF) senza avanzare
     int Sbumpc(); // Ritorna il carattere corrente e avanza di 1 posizione
-    size_t Sgetn(char* s, size_t count);
+    // size_t Sgetn(char* s, size_t count);
+
+
+    // =========================================================================
+    // NUOVE MATRICI CENTRALIZZATE: LETTURA A BLOCCHI CON TIMEOUT INTEGRATO
+    // =========================================================================
+    NTSTATUS Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, ULONG* bytesActuallyRead);
+    NTSTATUS Sgetn_Blocking(char* s, size_t count, ULONG* bytesActuallyRead);
+
+    void Clear() {
+        m_InBase = 0;
+        m_InPtr = 0;
+        m_InEnd = 0;
+        m_OutPtr = 0;
+        RtlZeroMemory(m_InputBuffer, STREAM_BUFFER_SIZE);
+        RtlZeroMemory(m_OutputBuffer, STREAM_BUFFER_SIZE);
+    }
 };
 
 #endif

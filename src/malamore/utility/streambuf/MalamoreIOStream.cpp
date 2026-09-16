@@ -75,9 +75,13 @@ VOID MalamoreIOStream::Close() {
 
 bool MalamoreIOStream::Flush() {
     if (m_CurrentBufferIndex == 0) return true;
+    // 1. Spinge i byte accumulati nella sosta locale verso l'array contiguo di KernelStreamBuf
+
     bool success = m_StreamBuf.Sputn(m_OutputBuffer, m_CurrentBufferIndex);
     if (success) {
+        // 2. Forza il KernelStreamBuf ad addormentarsi in attesa della ZwWriteFile asincrona
         success = m_StreamBuf.FlushOutput();
+        // 3. Ripristino e bonifica della memoria statica locale (Specifica 4)
         m_CurrentBufferIndex = 0;
         RtlZeroMemory(m_OutputBuffer, sizeof(m_OutputBuffer));
     }
@@ -101,59 +105,69 @@ MalamoreIOStream& MalamoreIOStream::operator<<(MalamoreIOStream& (*manipulator)(
 // =========================================================================
 
 NTSTATUS MalamoreIOStream::ReadWithTimeout(VOID* outBuffer, ULONG bytesToRead, ULONG timeoutUs, ULONG* bytesActuallyRead) {
-    if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) return STATUS_INVALID_PARAMETER;
-    *bytesActuallyRead = 0;
-    HANDLE hFile = m_StreamBuf.GetHandle();
-    if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
-
-    NTSTATUS status; IO_STATUS_BLOCK ioStatus; KEVENT ioEvent;
-    KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
-
-    status = ZwReadFile(hFile, &ioEvent, NULL, NULL, &ioStatus, outBuffer, bytesToRead, NULL, NULL);
-
-    if (status == STATUS_PENDING) {
-        LARGE_INTEGER kernelTimeout; kernelTimeout.QuadPart = -(LONGLONG)(timeoutUs * 10);
-        NTSTATUS waitStatus = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, &kernelTimeout);
-
-        if (waitStatus == STATUS_TIMEOUT) {
-            // SCATTO DEL TIMEOUT: Forza l'annullamento immediato dell'IRP/Overlapped orfano
-            ZwCancelIoFile(hFile, &ioStatus);
-
-            // SANIFICAZIONE HARDWARE VALIDA SIA IN RING 0 CHE IN RING 3:
-            // Svuota e riallinea completamente i buffer logici dello StreamBuf per ripristinare il descrittore
-            m_StreamBuf.AttachHandle(hFile);
-            m_InputLookaheadPtr = 0;
-            m_InputLookaheadEnd = 0;
-
-            return STATUS_TIMEOUT; // Ritorna lasciando il condotto utilizzabile per i passi successivi
-        } else {
-            status = ioStatus.Status;
-        }
-    }
-
-    if (NT_SUCCESS(status)) *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
-    return status;
+    return m_StreamBuf.Sgetn_Timeout(reinterpret_cast<char*>(outBuffer), bytesToRead, timeoutUs, bytesActuallyRead);
 }
 
 NTSTATUS MalamoreIOStream::ReadBlocking(VOID* outBuffer, ULONG bytesToRead, ULONG* bytesActuallyRead) {
-    if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) return STATUS_INVALID_PARAMETER;
-    *bytesActuallyRead = 0;
-    HANDLE hFile = m_StreamBuf.GetHandle();
-    if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
-
-    NTSTATUS status; IO_STATUS_BLOCK ioStatus; KEVENT ioEvent;
-    KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
-
-    status = ZwReadFile(hFile, &ioEvent, NULL, NULL, &ioStatus, outBuffer, bytesToRead, NULL, NULL);
-
-    if (status == STATUS_PENDING) {
-        status = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, NULL); // Attesa infinita
-        if (NT_SUCCESS(status)) status = ioStatus.Status;
-    }
-
-    if (NT_SUCCESS(status)) *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
-    return status;
+    return m_StreamBuf.Sgetn_Blocking(reinterpret_cast<char*>(outBuffer), bytesToRead, bytesActuallyRead);
 }
+// NTSTATUS MalamoreIOStream::ReadWithTimeout(VOID* outBuffer, ULONG bytesToRead, ULONG timeoutUs, ULONG* bytesActuallyRead) {
+//     if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) return STATUS_INVALID_PARAMETER;
+//     *bytesActuallyRead = 0;
+//     HANDLE hFile = m_StreamBuf.GetHandle();
+//     if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
+//
+//     NTSTATUS status; IO_STATUS_BLOCK ioStatus; KEVENT ioEvent;
+//     KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
+//
+//     status = ZwReadFile(hFile, &ioEvent, NULL, NULL, &ioStatus, outBuffer, bytesToRead, NULL, NULL);
+//
+//     if (status == STATUS_PENDING) {
+//         LARGE_INTEGER kernelTimeout; kernelTimeout.QuadPart = -(LONGLONG)(timeoutUs * 10);
+//         NTSTATUS waitStatus = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, &kernelTimeout);
+//
+//         if (waitStatus == STATUS_TIMEOUT) {
+//             // SCATTO DEL TIMEOUT: Forza l'annullamento immediato dell'IRP/Overlapped orfano
+//             ZwCancelIoFile(hFile, &ioStatus);
+//
+//             // LA VERA RETTIFICA: Resetta lo stream buffer interno per sbloccare l'EOF residuo
+//             m_StreamBuf.Clear();
+//
+//             // // SANIFICAZIONE HARDWARE VALIDA SIA IN RING 0 CHE IN RING 3:
+//             // // Svuota e riallinea completamente i buffer logici dello StreamBuf per ripristinare il descrittore
+//             // m_StreamBuf.AttachHandle(hFile);
+//             m_InputLookaheadPtr = 0;
+//             m_InputLookaheadEnd = 0;
+//
+//             return STATUS_TIMEOUT; // Ritorna lasciando il condotto utilizzabile per i passi successivi
+//         } else {
+//             status = ioStatus.Status;
+//         }
+//     }
+//
+//     if (NT_SUCCESS(status)) *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
+//     return status;
+// }
+//
+// NTSTATUS MalamoreIOStream::ReadBlocking(VOID* outBuffer, ULONG bytesToRead, ULONG* bytesActuallyRead) {
+//     if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) return STATUS_INVALID_PARAMETER;
+//     *bytesActuallyRead = 0;
+//     HANDLE hFile = m_StreamBuf.GetHandle();
+//     if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
+//
+//     NTSTATUS status; IO_STATUS_BLOCK ioStatus; KEVENT ioEvent;
+//     KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
+//
+//     status = ZwReadFile(hFile, &ioEvent, NULL, NULL, &ioStatus, outBuffer, bytesToRead, NULL, NULL);
+//
+//     if (status == STATUS_PENDING) {
+//         status = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, NULL); // Attesa infinita
+//         if (NT_SUCCESS(status)) status = ioStatus.Status;
+//     }
+//
+//     if (NT_SUCCESS(status)) *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
+//     return status;
+// }
 
 // =========================================================================
 // IMPLEMENTAZIONE DELLA GETLINE ASINCRONA PROTETTA CROSS-LAYER
@@ -163,31 +177,15 @@ size_t MalamoreIOStream::GetLine(char* buffer, size_t maxCount, char delimiter) 
     size_t count = 0;
 
     while (count < (maxCount - 1)) {
-        // Se la nostra get area locale è vuota, eseguiamo un riempimento asincrono protetto block-level
-        if (m_InputLookaheadPtr >= m_InputLookaheadEnd) {
-            ULONG fetchedBytes = 0;
+        int ch = m_StreamBuf.Sbumpc(); // Si appoggia al KernelStreamBuf ripulito dal Clear()
+        if (ch == -1) break;
 
-            // Invocazione della ReadBlocking asincrona nativa (Pulisce lo stato post-timeout dell'I/O Manager)
-            NTSTATUS status = this->ReadBlocking(m_InputLookaheadBuffer, STREAM_BUFFER_SIZE, &fetchedBytes);
+        if (static_cast<char>(ch) == delimiter) break;
+        if (static_cast<char>(ch) == '\r' && delimiter == '\n') continue;
 
-            if (!NT_SUCCESS(status) || fetchedBytes == 0) {
-                break; // EOF o interruzione fisica del canale hardware
-            }
-            m_InputLookaheadPtr = 0;
-            m_InputLookaheadEnd = fetchedBytes;
-        }
-
-        char ch = m_InputLookaheadBuffer[m_InputLookaheadPtr++];
-
-        if (ch == delimiter) {
-            break; // Trovato il delimitatore di riga terminato
-        }
-
-        if (ch == '\r' && delimiter == '\n') continue; // Salta il carriage return standard
-
-        buffer[count++] = ch;
+        buffer[count++] = static_cast<char>(ch);
     }
 
-    buffer[count] = '\0'; // Terminazione stringa deterministica di Ring 0 / Ring 3
+    buffer[count] = '\0';
     return count;
 }
