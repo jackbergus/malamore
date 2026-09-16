@@ -3,7 +3,7 @@
 //
 
 #include <malamore/structures/MessageMap.h>
-#include <ntddk.h>
+// #include <ntddk.h>
 
 // #include <cstring> // Utilizzo delle funzioni standard per l'azzeramento e copia della memoria
 

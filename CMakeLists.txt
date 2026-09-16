@@ -191,5 +191,13 @@ add_custom_target(CertificaDriver ALL
 )
 
 
+add_library(user_level_struct_library OBJECT
+        src/malamore/structures/InterProcessChannelData.cpp
+        src/malamore/structures/MessageMap.cpp
+        src/malamore/structures/TelemetryQueue.cpp)
+
 add_executable(writing_thread_test tests/writing_thread_test.cpp)
-target_link_libraries(writing_thread_test Catch2WithMain)
+target_link_libraries(writing_thread_test Catch2WithMain user_level_struct_library)
+
+add_executable(structures_test tests/structures_test.cpp)
+target_link_libraries(structures_test Catch2WithMain user_level_struct_library)

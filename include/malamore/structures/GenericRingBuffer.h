@@ -11,6 +11,8 @@
 
 #include <malamore/utility/kernel_compatibility.h>
 
+#include "malamore/utility/math.h"
+
 #pragma pack(push, 1)
 // Il TAS Lock rimane compatto a 1 byte o 4 byte
 struct TAS_CHANNEL_LOCK {
@@ -68,13 +70,13 @@ struct GenericRingBuffer {
         }
 
         // Mascheramento bit a bit velocissimo (funziona se QueueDepth è potenza di 2)
-        LONG currentWrite = this->WriteIndex & (QueueDepth - 1);
+        LONG currentWrite = Malamore::Math::WrapIndex<QueueDepth>(this->WriteIndex);
         RtlCopyMemory(&this->Buffer[currentWrite], newItem, sizeof(T));
 
         // Hardware Memory Barrier contro le ottimizzazioni out-of-order della CPU
         KeMemoryBarrier();
 
-        this->WriteIndex = (this->WriteIndex + 1) & (QueueDepth - 1);
+        this->WriteIndex = Malamore::Math::WrapIndex<QueueDepth>((this->WriteIndex + 1));
 
         // 3. Rilascio del lock
         InterlockedExchange(&this->WriteLock.WriterState, 0);
@@ -87,7 +89,7 @@ struct GenericRingBuffer {
     // Lettura Zero-Copy Single-Reader (Completamente Lock-Free)
     inline const T* Top() const {
         if (this->IsEmpty()) return nullptr;
-        LONG currentRead = this->ReadIndex & (QueueDepth - 1);
+        LONG currentRead = Malamore::Math::WrapIndex<QueueDepth>(this->ReadIndex);
         return &this->Buffer[currentRead];
     }
 
@@ -96,7 +98,7 @@ struct GenericRingBuffer {
         if (this->IsEmpty()) return FALSE;
 
         KeMemoryBarrier(); // Blinda la conclusione della lettura prima del rilascio dello slot
-        this->ReadIndex = (this->ReadIndex + 1) & (QueueDepth - 1);
+        this->ReadIndex = Malamore::Math::WrapIndex<QueueDepth>(this->ReadIndex + 1);
         InterlockedDecrement(&this->MessageCount);
         return TRUE;
     }

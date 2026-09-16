@@ -3,7 +3,7 @@
 //
 
 
-#include <windows.h>
+#include <malamore/utility/kernel_compatibility.h>
 
 #ifndef MALAMORE_MESSAGEMAP_H
 #define MALAMORE_MESSAGEMAP_H

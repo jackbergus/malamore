@@ -38,7 +38,6 @@ UCHAR PayloadData[1024];*/
 BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONG Timestamp, ULONG SourceNodeId, const UCHAR* PayloadData ,ULONG DataLength) {
     if (cb == nullptr) return FALSE;
      {
-
         // 1. Acquisizione del lock tra i soli scrittori concorrenti
         while (InterlockedExchange(&cb->WriteLock.WriterState, 1) == 1) {
             YieldProcessor(); // Istruzione assembly PAUSE
@@ -50,8 +49,8 @@ BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONG Timestamp, ULONG Sou
             return FALSE;
         }
 
-        // Mascheramento bit a bit velocissimo (funziona se QueueDepth è potenza di 2)
-        LONG currentWrite = cb->WriteIndex & (InterProcessChannelData::QUEUE_DEPTH - 1);
+        // Mascheramento bit a bit velocissimo (funziona se QueueDepth è potenza di 2).
+        LONG currentWrite = Malamore::Math::WrapIndex<InterProcessChannelData::QUEUE_DEPTH>(cb->WriteIndex);
         if (DataLength > DataChannelParcelArraySize) {
             DataLength = DataChannelParcelArraySize;
         }
@@ -63,8 +62,7 @@ BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONG Timestamp, ULONG Sou
 
         // Hardware Memory Barrier contro le ottimizzazioni out-of-order della CPU
         KeMemoryBarrier();
-
-        cb->WriteIndex = (cb->WriteIndex + 1) & (InterProcessChannelData::QUEUE_DEPTH - 1);
+        cb->WriteIndex = Malamore::Math::WrapIndex<InterProcessChannelData::QUEUE_DEPTH>(cb->WriteIndex + ((LONG)1));
 
         // 3. Rilascio del lock
         InterlockedExchange(&cb->WriteLock.WriterState, 0);

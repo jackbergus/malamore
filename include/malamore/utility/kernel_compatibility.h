@@ -331,6 +331,12 @@ inline NTSTATUS ZwClose(HANDLE Handle) {
     #define Executive 0
 #endif
 
+// Mappatura trasparente di KeMemoryBarrier sulla barriera hardware nativa di MSVC Ring 3
+// Forza la CPU a completare tutti i transiti di cache (Read/Write) prima di avanzare.
+#ifndef KeMemoryBarrier
+#define KeMemoryBarrier()                   MemoryBarrier()
+#endif
+
 #endif
 
 
