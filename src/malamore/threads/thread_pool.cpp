@@ -19,6 +19,7 @@ static MalamoreOStream  telemetryFile;
 static LARGE_INTEGER freq;
 static LARGE_INTEGER currentTicks;
 
+
 extern "C" ULONG64 usecToTicks(const ULONG64 usec) {
     return (static_cast<ULONG64>(usec) * freq.QuadPart) / 1000000ULL;
 }
@@ -37,7 +38,7 @@ extern "C" VOID dumpBinaryTelemetryToFile() {
     telemetryFile.Flush();
 }
 
-extern "C" NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {
+extern "C" NTSTATUS CorePool_RouteMessageSrcToDest(ULONGLONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {
     InterProcessChannelData* pChannel;
     if (targetNodeId == TELEMETRY_WRITER_ID) {
         pChannel = &g_PoolRegistry.TelemetryChannel;

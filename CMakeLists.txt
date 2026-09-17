@@ -76,7 +76,8 @@ message(STATUS "Python trovato in: ${Python_EXECUTABLE}")
 
 set(EXPORT_DRIVER_NAME "driver_lettura")
 
-add_executable(client_malamore client_malamore.cpp)
+add_executable(client_malamore client_malamore.cpp
+        ReadTelemetryFile.cpp)
 
 # Aggiunta del driver (rimosso EXCLUDE_FROM_ALL per farlo compilare di default)
 wdk_add_driver(${DRIVER_NAME}
@@ -218,3 +219,5 @@ target_link_libraries(test_read_driver user_level_struct_library)
 
 add_executable(test_architecture tests/test_architecture.cpp)
 target_link_libraries(test_architecture Catch2WithMain user_level_struct_library)
+
+add_executable(read_telemetry_file ReadTelemetryFile.cpp)

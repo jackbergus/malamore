@@ -35,7 +35,7 @@ ULONG SourceNodeId;
 ULONG DataLength;
 UCHAR PayloadData[1024];*/
 
-BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONG Timestamp, ULONG SourceNodeId, const UCHAR* PayloadData ,ULONG DataLength) {
+BOOLEAN RealTimeIPC_Push(InterProcessChannelData* cb, ULONGLONG Timestamp, ULONG SourceNodeId, const UCHAR* PayloadData ,ULONG DataLength) {
     if (cb == nullptr) return FALSE;
      {
         // 1. Acquisizione del lock tra i soli scrittori concorrenti

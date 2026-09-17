@@ -31,6 +31,8 @@ TEST_CASE("BASIC_ARCHITECTURE") {
     Win32NamedPipeGuard hardwarePipeServer(2);
     REQUIRE(NT_SUCCESS(hardwarePipeServer.Create(L"HWDriverSimulator", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
     REQUIRE(NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected2, &result)));
+
+
     auto devicePath = hardwarePipeServer.GetPath().wstring();
     auto status = CorePool_InitializeRegistry(75); // The main task is actually activated here
     REQUIRE(NT_SUCCESS(status));
