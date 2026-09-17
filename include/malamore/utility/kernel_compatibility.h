@@ -185,6 +185,7 @@ typedef DWORD (WINAPI *PKSTART_ROUTINE)(LPVOID lpThreadParameter);
 // Mappatura dell'oggetto Evento del Kernel sull'Handle Win32 ordinario
 typedef struct _KEVENT {
     HANDLE Handle;
+    OVERLAPPED Overlapped; // <--- AGGIUNTA: Il contesto asincrono vive e muore con l'evento!
 } KEVENT, *PKEVENT;
 
 
@@ -320,6 +321,24 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
             creationDisposition = OPEN_ALWAYS;
         }
 
+    // Manteniamo intatto il parametro originale specificato dal chiamante
+    DWORD shareMode = ShareAccess;
+
+    // APPLICAZIONE CONDIZIONALE PROTETTA:
+    // Eseguiamo il fallback di condivisione SOLO se l'oggetto è palesemente un file regolare su disco
+    // (identificabile dall'assenza dei prefissi hardware e dalla presenza di un'estensione come .txt o .bin)
+    // se e solo se non stiamo negoziando una Named Pipe o un Device Link (\??\ o \DosDevices\)
+    if (shareMode == 0 &&
+        wcsncmp(win32Path, L"\\\\.\\pipe\\", 9) != 0 &&
+        wcsncmp(ObjectAttributes->ObjectName->Buffer, L"\\??\\", 4) != 0 &&
+        wcsncmp(ObjectAttributes->ObjectName->Buffer, L"\\DosDevices\\", 12) != 0)
+    {
+        // Solo per i file di log/telemetria standard forziamo la condivisione per evitare che i blocchi di scope
+        // successivi rimangano blindati fuori dal file system a causa del delayed metadata flushing.
+        shareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    }
+    ShareAccess |= shareMode;
+
         HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes | FILE_FLAG_OVERLAPPED, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
@@ -423,26 +442,38 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
         }
 
         PKEVENT pKernelEvent = reinterpret_cast<PKEVENT>(Event);
-        OVERLAPPED overlappedContext;
-        RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
-
-        if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
-            overlappedContext.hEvent = pKernelEvent->Handle;
+        if (pKernelEvent == nullptr || pKernelEvent->Handle == NULL) {
+            return STATUS_INVALID_PARAMETER;
         }
+        // OVERLAPPED overlappedContext;
+        // RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
+
+        // if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
+        //     overlappedContext.hEvent = pKernelEvent->Handle;
+        // }
+    // CORREZIONE DEFINITIVA: Usiamo la struttura OVERLAPPED persistente integrata nell'evento!
+    // In questo modo l'I/O Manager registra l'operazione su una memoria stabile che NON viene distrutta al return!
+    LPOVERLAPPED pMyOverlapped = &pKernelEvent->Overlapped;
+
 
         // 1. GESTIONE MANUALE DELL'OFFSET PER I FILE SU DISCO
         DWORD fileType = GetFileType(FileHandle);
         LARGE_INTEGER currentFilePointer = { 0 };
 
         if (fileType == FILE_TYPE_DISK) {
-            currentFilePointer.QuadPart = 0;
+            /*currentFilePointer.QuadPart = 0;
             currentFilePointer.LowPart = SetFilePointer(FileHandle, 0, &currentFilePointer.HighPart, FILE_CURRENT);
             overlappedContext.Offset = currentFilePointer.LowPart;
-            overlappedContext.OffsetHigh = currentFilePointer.HighPart;
+            overlappedContext.OffsetHigh = currentFilePointer.HighPart;*/
+            LARGE_INTEGER currentFilePointer = { 0 };
+            currentFilePointer.QuadPart = 0;
+            currentFilePointer.LowPart = SetFilePointer(FileHandle, 0, &currentFilePointer.HighPart, FILE_CURRENT);
+            pMyOverlapped->Offset = currentFilePointer.LowPart;
+            pMyOverlapped->OffsetHigh = currentFilePointer.HighPart;
         }
 
         DWORD bytesRead = 0;
-        BOOL success = ReadFile(FileHandle, Buffer, Length, &bytesRead, &overlappedContext);
+        BOOL success = ReadFile(FileHandle, Buffer, Length, &bytesRead, pMyOverlapped);
 
         if (success) {
             IoStatusBlock->Information = bytesRead;
@@ -469,7 +500,7 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
                 // CASO B: LETTURA SINCRONA COMPENSATA (Sgetn_Blocking / Sgetc)
                 // Forza l'attesa immediata e scarica i byte, risolvendo il bug della 't' fissa
                 DWORD bytesTransferred = 0;
-                if (GetOverlappedResult(FileHandle, &overlappedContext, &bytesTransferred, TRUE)) {
+                if (GetOverlappedResult(FileHandle, pMyOverlapped, &bytesTransferred, TRUE)) {
                     IoStatusBlock->Information = bytesTransferred;
                     IoStatusBlock->Status = STATUS_SUCCESS;
 
@@ -533,16 +564,36 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
 
     // Estrae l'oggetto KEVENT finto dal parametro astratto
     PKEVENT pKernelEvent = reinterpret_cast<PKEVENT>(Event);
+    if (pKernelEvent == nullptr || pKernelEvent->Handle == NULL) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    LPOVERLAPPED pMyOverlapped = &pKernelEvent->Overlapped;
 
+    // CORREZIONE HARDWARE CRITICA: Windows esige che hEvent sia VALIDO ad ogni costo.
+    // Forziamo il riallineamento dell'Handle Win32 autentico subito prima del lancio di WriteFile,
+    // annullando qualsiasi corruzione o azzeramento residuo avvenuto nei passi precedenti!
+    pMyOverlapped->hEvent = pKernelEvent->Handle;
+    DWORD fileType = GetFileType(FileHandle);
+    if (fileType == FILE_TYPE_DISK) {
+        // Se l'offset logico non è ancora stato impostato da FlushOutput, lo prendiamo dal file pointer corrente
+        if (pMyOverlapped->Offset == 0 && pMyOverlapped->OffsetHigh == 0) {
+            LARGE_INTEGER currentFilePointer = { 0 };
+            currentFilePointer.LowPart = SetFilePointer(FileHandle, 0, &currentFilePointer.HighPart, FILE_CURRENT);
+            pMyOverlapped->Offset = currentFilePointer.LowPart;
+            pMyOverlapped->OffsetHigh = currentFilePointer.HighPart;
+        }
+        pMyOverlapped->Internal = 0;
+        pMyOverlapped->InternalHigh = 0;
+    }
     // Allocazione di sbarramento per il contesto asincrono di Win32
     OVERLAPPED overlappedContext;
     RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
 
-    // Se lo stream ha configurato un evento di notifica per la Put Area, lo leghiamo all'OVERLAPPED
-    if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
-        overlappedContext.hEvent = pKernelEvent->Handle; //
-    }
-
+    // // Se lo stream ha configurato un evento di notifica per la Put Area, lo leghiamo all'OVERLAPPED
+    // if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
+    //     overlappedContext.hEvent = pKernelEvent->Handle; //
+    // }
+    // DWORD fileType = GetFileType(FileHandle);
     DWORD bytesWritten = 0;
 
     // ORA FUNZIONA: Passando overlappedContext, WriteFile accetta l'handle FILE_FLAG_OVERLAPPED
@@ -553,16 +604,70 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
         // Caso Fast I/O sincrono fulmineo (I byte sono già nella cache di pagina)
         IoStatusBlock->Information = bytesWritten; //
         IoStatusBlock->Status = STATUS_SUCCESS; //
-        return STATUS_SUCCESS; //
+        // AVANZAMENTO ATOMICO MANUALE SOLO PER FILE REGOLARI SU DISCO A RING 3
+        if (fileType == FILE_TYPE_DISK && bytesWritten > 0) {
+            ULONG64 currentOffset = (static_cast<ULONG64>(pMyOverlapped->OffsetHigh) << 32) | pMyOverlapped->Offset;
+            currentOffset += bytesWritten;
+
+            pMyOverlapped->Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
+            pMyOverlapped->OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
+
+            // Riallineiamo anche il cursore logico di Win32 per consistenza
+            LARGE_INTEGER moveOffset;
+            moveOffset.QuadPart = bytesWritten;
+            SetFilePointer(FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
+        }
+        return STATUS_SUCCESS;
     }
 
     DWORD lastError = GetLastError();
 
     // Se l'operazione di scrittura viene presa in carico in background dall'I/O Manager
     if (lastError == ERROR_IO_PENDING) {
-        IoStatusBlock->Information = 0; //
-        IoStatusBlock->Status = STATUS_PENDING; //
-        return STATUS_PENDING; // Mappatura nativa e corretta di Ring 0!
+        // Forza il completamento inline immediato in scrittura (Fast I/O o Blocco sincrono per i file)
+        DWORD bytesTransferred = 0;
+        if (GetOverlappedResult(FileHandle, pMyOverlapped, &bytesTransferred, TRUE)) {
+            IoStatusBlock->Status = STATUS_PENDING;
+            IoStatusBlock->Information = bytesTransferred; //0;
+
+            // =========================================================================
+            // CORREZIONE ASINCRONA MANCANTE CRITICA: AVANZAMENTO OFFSET POST-PENDING
+            // =========================================================================
+            if (fileType == FILE_TYPE_DISK && bytesTransferred > 0) {
+                ULONG64 currentOffset = (static_cast<ULONG64>(pMyOverlapped->OffsetHigh) << 32) | pMyOverlapped->Offset;
+                currentOffset += bytesTransferred; // Incrementiamo la sbarra reale cumulativa!
+
+                pMyOverlapped->Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
+                pMyOverlapped->OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
+
+                LARGE_INTEGER moveOffset; moveOffset.QuadPart = bytesTransferred;
+                SetFilePointer(FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
+            }
+
+            // Restituiamo STATUS_SUCCESS perché GetOverlappedResult(..., TRUE) ha già chiuso la transazione!
+            return STATUS_SUCCESS;
+            // RISOLUTIVO: Ritorniamo STATUS_PENDING immediatamente!
+            // Eliminando la GetOverlappedResult(..., TRUE) che veniva eseguita qui dentro,
+            // impediamo a Windows NT di troncare orfano il file ad ogni scrittura successiva!
+            // return STATUS_PENDING;
+            // IoStatusBlock->Information = bytesTransferred;
+            // IoStatusBlock->Status = STATUS_SUCCESS;
+            //
+            // if (fileType == FILE_TYPE_DISK && bytesTransferred > 0) {
+            //     ULONG64 currentOffset = (static_cast<ULONG64>(pMyOverlapped->OffsetHigh) << 32) | pMyOverlapped->Offset;
+            //     currentOffset += bytesTransferred;
+            //
+            //     pMyOverlapped->Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
+            //     pMyOverlapped->OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
+            //
+            //     LARGE_INTEGER moveOffset; moveOffset.QuadPart = bytesTransferred;
+            //     SetFilePointer(FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
+            // }
+            // return STATUS_SUCCESS;
+        }
+        // IoStatusBlock->Information = 0; //
+        // IoStatusBlock->Status = STATUS_PENDING; //
+        // return STATUS_PENDING; // Mappatura nativa e corretta di Ring 0!
     }
 
     IoStatusBlock->Information = 0; //
@@ -622,13 +727,23 @@ inline void KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State) {
     UNREFERENCED_PARAMETER(Type);
     if (Event) {
         // Crea un evento Win32 manual-reset o auto-reset anonimo
+        /*Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+*/
+
         Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+        RtlZeroMemory(&Event->Overlapped, sizeof(OVERLAPPED));
+        Event->Overlapped.hEvent = Event->Handle; // Sincronizzazione automatica nativa
     }
 }
 
 // Risolutivo per KeResetEvent richiesto: Abbassa la sbarra di sincronizzazione Win32
 inline void KeResetEvent(PKEVENT Event) {
-    if (Event && Event->Handle) ResetEvent(Event->Handle);
+    if (Event && Event->Handle) {
+        ResetEvent(Event->Handle);
+        // Preserviamo l'offset ma azzeriamo lo stato transizionale interno dell'I/O Manager
+        // Event->Overlapped.Internal = 0;
+        // Event->Overlapped.InternalHigh = 0;
+    }
 }
 
 // Risolutivo per KeQueryPerformanceCounter: Interroga i tick orari della CPU ad alta precisione

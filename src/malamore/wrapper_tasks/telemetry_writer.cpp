@@ -28,9 +28,9 @@ VOID TelemetrySink(struct UnifiedThreadContext *Context, struct FutureResultParc
             LARGE_INTEGER tmp = KeQueryPerformanceCounter(NULL);
             if (tmp.QuadPart + 10 < (nextPeriodOfTime.QuadPart + periodTicks)) {
                 interval.QuadPart = nextPeriodOfTime.QuadPart + periodTicks- tmp.QuadPart;
+                // Waiting for some time, after the sampling interval.
+                KeDelayExecutionThread(KernelMode, FALSE, &interval);
             }
-            // Waiting for some time, after the sampling interval.
-            KeDelayExecutionThread(KernelMode, FALSE, &interval);
             continue;
         }
         dumpBinaryTelemetryToFile();

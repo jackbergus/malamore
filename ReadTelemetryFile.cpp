@@ -15,12 +15,24 @@ int main() {
     std::filesystem::path file{"Malamore_Telemetry_Sink.txt"};
     if (std::filesystem::is_regular_file(file)) {
         DataChannelParcel parcel;
-        std::ifstream stream{file, std::ios::binary};
-        while (stream.read(reinterpret_cast<char *>(&parcel), sizeof(parcel))) {
-            memset(buffer, 0, sizeof(buffer));
-            strncpy(buffer, (char *)(parcel.PayloadData), min(sizeof(buffer), parcel.DataLength));
-            std::cout << buffer << std::endl;
+        FILE * fptr;
+        fptr = fopen("Malamore_Telemetry_Sink.txt", "rb");
+        if(fptr == NULL) {
+            printf("Unable to open the file\n");
+
+            exit(1);
         }
+        else {
+            // Reading until the end of the file using fread
+            size_t bytesRead;
+            while ((bytesRead = fread(&parcel, sizeof(parcel), 1, fptr)) > 0) {
+                // Process the data in the buffer (example: print to stdout)
+                std::cout << parcel.PayloadData << std::endl;
+            }
+
+            fclose(fptr);
+        }
+        return 0;
     } else {
         std::cerr << "File does not exist" << std::endl;
     }

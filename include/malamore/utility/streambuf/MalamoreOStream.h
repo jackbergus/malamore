@@ -69,6 +69,10 @@ inline MalamoreOStream& endl(MalamoreOStream& os) {
     os << "\r\n";
     return os;
 }
+inline MalamoreOStream& sflush(MalamoreOStream& os) {
+    os.Flush();
+    return os;
+}
 
 #endif
 

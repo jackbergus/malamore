@@ -35,6 +35,9 @@ private:
     // Contesto Overlapped nativo di Ring 3 legato alla vita del buffer (Non volatile!)
     OVERLAPPED      m_GlobalOverlapped;
 #endif
+    // SPECIFICA 4: Registri di posizione hardware protetti da azzeramenti spuri
+    ULONG64         m_WriteFileOffset{0};
+    ULONG64         m_ReadFileOffset;
 
 public:
     KernelStreamBuf();
@@ -67,6 +70,11 @@ public:
         m_OutPtr = 0;
         RtlZeroMemory(m_InputBuffer, STREAM_BUFFER_SIZE);
         RtlZeroMemory(m_OutputBuffer, STREAM_BUFFER_SIZE);
+#ifndef LINK_KERNEL
+        // L'AZZERAMENTO DELL'OFFSET AVVIENE SOLO QUI (UNA VOLTA SOLA ALL'INIZIO DEL FLUSSO)
+        RtlZeroMemory(&m_GlobalIoEvent.Overlapped, sizeof(OVERLAPPED));
+        m_GlobalIoEvent.Overlapped.hEvent = m_GlobalIoEvent.Handle;
+#endif
     }
 };
 

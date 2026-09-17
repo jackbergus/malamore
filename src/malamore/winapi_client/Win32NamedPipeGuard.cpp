@@ -39,9 +39,11 @@ NTSTATUS Win32NamedPipeGuard::Create(const WCHAR* pipeName, ULONG streamFlags, U
     m_PipeHandle = CreateNamedPipeW(
         m_FullPipePath,
         openMode,
-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, //PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
         nmaxconn, maxBufferSize, maxBufferSize, 0, NULL
     );
+
+
 
     if (m_PipeHandle == INVALID_HANDLE_VALUE) {
         m_CachedPath = L"";

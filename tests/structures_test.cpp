@@ -112,7 +112,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
         MalamoreOStream file_output{};
         REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamFlags::Creat | StreamFlags::Trunc | StreamFlags::Write)));
 
-        file_output << "this is a new line" << "\n";
+        file_output << "this is a new line" << "\n" <<sflush;
         file_output << "this is yet another line" << "\n";
     }
 

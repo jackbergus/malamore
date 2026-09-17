@@ -40,7 +40,7 @@ NTSTATUS MalamoreIOStream::Open(const MalamorePath& path, ULONG flags) {
     InitializeObjectAttributes(&objAttr, &m_UnicodePath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
 
     bool isHW = path.is_hardware_device();
-    ACCESS_MASK desiredAccess = isHW ? SYNCHRONIZE : 0;
+    ACCESS_MASK desiredAccess = SYNCHRONIZE; //isHW ? SYNCHRONIZE : 0;
     ULONG nativeDisposition = 0;
 
     if (flags & StreamFlags::Append) desiredAccess |= FILE_APPEND_DATA;
