@@ -28,18 +28,34 @@ void OnPipeClientConnected2(PVOID Context, NTSTATUS CompletionStatus) {
 TEST_CASE("BASIC_ARCHITECTURE") {
     char output_buffer[1024];
     ULONG result = 0;
-
-
     Win32NamedPipeGuard hardwarePipeServer(2);
-    REQUIRE(NT_SUCCESS(hardwarePipeServer.Create(L"MalamoreDuplexSocket", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
+    REQUIRE(NT_SUCCESS(hardwarePipeServer.Create(L"HWDriverSimulator", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
     REQUIRE(NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected2, &result)));
     auto devicePath = hardwarePipeServer.GetPath().wstring();
-
     auto status = CorePool_InitializeRegistry(75);
     REQUIRE(NT_SUCCESS(status));
     status = CorePool_RegisterHwReader(devicePath,3000, 3333, TELEMETRY_WRITER_ID);
     REQUIRE(NT_SUCCESS(status));
+    // This should start the hardware service starting to read some messages from the socket
     status = CorePool_StartPoolExecution();
     REQUIRE(NT_SUCCESS(status));
-    std::this_thread::sleep_for(std::chrono::minutes(10));
+
+    // Waiting for five seconds before starting simuilating the hardware sending signals
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+// #if 0
+    for (uint64_t t = 0; t < 100; t++) {
+        // Simulating the driver sending messages constantly at 3 millisecond rate
+        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+        snprintf(output_buffer, sizeof(output_buffer), "Msg #%llu\n", t);
+        hardwarePipeServer.Write(output_buffer, strlen(output_buffer), &result);
+        // Expecting that I am actually writing something
+        REQUIRE(strlen(output_buffer) == result);
+    }
+// #endif
+
+
+
+    // This timeout is required, so that the threads are not going to be closed due to the global closure of the system
+
 }

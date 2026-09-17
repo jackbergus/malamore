@@ -220,7 +220,11 @@ NTSTATUS CorePool_StartPoolExecution() {
 
                     // Tentativo di spawn del System Thread
                     auto& t = task->ContextAB[0]->actualThread;
-                    t.Init(&task->ContextAB[0]->threadArgument, TelemetrySink);
+                    if (slot->Type == THREAD_TYPE_HW_READER) {
+                        t.Init(&task->ContextAB[0]->threadArgument, HardwareReaderThreadRoutine);
+                    } else { // THREAD_TYPE_TELEMETRY_WRITER
+                        t.Init(&task->ContextAB[0]->threadArgument, TelemetrySink);
+                    }
                     status = t.Start();
 
                     // VERIFICA RIGIDA DI INTEGRITÀ DI SPATIAL SPAWN

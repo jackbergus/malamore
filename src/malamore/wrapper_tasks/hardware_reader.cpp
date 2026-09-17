@@ -53,21 +53,35 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     // =========================================================================
     // LOOP PRINCIPALE DI LETTURA PERIODICA ASINCRONA (PASSIVE_LEVEL - 3.33ms)
     // =========================================================================
-    THREAD_PERIOD_LOOP_UNTIL_ALIVE(&nextPeriodTime, &currentTime, Context, Timestamp)
+    while ((&nextPeriodTime) && (&currentTime) && (Context) && KernelAtomicRead(
+               &((struct UnifiedThreadContext *) Context)->KeepRunning) == 1) {
+        do {
+            _mm_pause();
+            *((LARGE_INTEGER *) &currentTime) = KeQueryPerformanceCounter(0);
+        } while ((((LARGE_INTEGER *) &currentTime)->QuadPart < ((LARGE_INTEGER *) &nextPeriodTime)->QuadPart) && (
+                     KernelAtomicRead(&((struct UnifiedThreadContext *) Context)->KeepRunning) == 1));
+        if (KernelAtomicRead(&((struct UnifiedThreadContext *) Context)->KeepRunning) == 0) {
+            break;
+        }
         RtlZeroMemory(idata, HARDWARE_PAYLOAD_SIZE);
         // CONFIGURAZIONE DEL TIMEOUT RIGIDO DEL KERNEL
         status = driver.ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
-        if (NT_SUCCESS(status)) {
+        if (status == STATUS_SUCCESS) {
+            const ULONG64 Timestamp = (((LARGE_INTEGER *) &currentTime)->QuadPart * 1000000ULL) / ((struct UnifiedThreadContext
+                              *) Context)->PerfCounterFrequency;
             status = CorePool_RouteMessageSrcToDest(Timestamp, HARDWARE_READER_ID, Context->TargetThreadId, idata, bytesActuallyRead);
             if (!NT_SUCCESS(status)) {
                 KdPrint(("There was an issue while attempting to send the response at time %llu\n", Timestamp));
             }
-        } else if (status == STATUS_INVALID_DEVICE_STATE) {
+        }
+        else if (status == STATUS_TIMEOUT) {
             // Timeout, continuing to navigate the system
-        } else if (status == STATUS_INVALID_DEVICE_STATE) {
+        } else {
             KdPrint(("ERROR: there was an error on the driver state, that does not allow me to continue reading"));
         }
-    THREAD_NEXT_PERIOD_AFTER_TICKS(&nextPeriodTime, periodTicks)
+        if (&nextPeriodTime)
+            ((LARGE_INTEGER *) &nextPeriodTime)->QuadPart += ((ULONG64) periodTicks);
+    }
 
     driver.Close();
     KeRevertToUserGroupAffinityThread(&previousAffinity);

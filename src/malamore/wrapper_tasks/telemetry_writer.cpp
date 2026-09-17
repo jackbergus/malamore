@@ -16,7 +16,7 @@ VOID TelemetrySink(struct UnifiedThreadContext *Context, struct FutureResultParc
            &((struct UnifiedThreadContext *) Context)->KeepRunning) == 1) {
         do {
             _mm_pause();
-            *((LARGE_INTEGER *) &currentTime) = KeQueryPerformanceCounter(0);
+            *((LARGE_INTEGER *) &currentTime) = KeQueryPerformanceCounter(NULL);
         } while ((((LARGE_INTEGER *) &currentTime)->QuadPart < ((LARGE_INTEGER *) &nextPeriodOfTime)->QuadPart) && (
                      KernelAtomicRead(&((struct UnifiedThreadContext *) Context)->KeepRunning) == 1));
         if (KernelAtomicRead(&((struct UnifiedThreadContext *) Context)->KeepRunning) == 0) { break; }
@@ -25,11 +25,17 @@ VOID TelemetrySink(struct UnifiedThreadContext *Context, struct FutureResultParc
         if (isTelemetryQueueEmpty()) {
             // Se la coda è vuota, rilascia temporaneamente la CPU con un piccolo stallo preventivo
             LARGE_INTEGER interval;
-            interval.QuadPart = -100 * 1000; // 10 millisecondi di sleep relativo
+            LARGE_INTEGER tmp = KeQueryPerformanceCounter(NULL);
+            if (tmp.QuadPart + 10 < (nextPeriodOfTime.QuadPart + periodTicks)) {
+                interval.QuadPart = nextPeriodOfTime.QuadPart + periodTicks- tmp.QuadPart;
+            }
+            // Waiting for some time, after the sampling interval.
             KeDelayExecutionThread(KernelMode, FALSE, &interval);
             continue;
         }
 
         dumpBinaryTelemetryToFile();
-    THREAD_NEXT_PERIOD_AFTER_TICKS(&nextPeriodOfTime, periodTicks);
+        if (&nextPeriodOfTime)
+            ((LARGE_INTEGER *) &nextPeriodOfTime)->QuadPart += ((ULONG64) periodTicks);
+    }
 }
