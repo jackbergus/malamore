@@ -586,8 +586,8 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
         pMyOverlapped->InternalHigh = 0;
     }
     // Allocazione di sbarramento per il contesto asincrono di Win32
-    OVERLAPPED overlappedContext;
-    RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
+    // OVERLAPPED overlappedContext;
+    // RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
 
     // // Se lo stream ha configurato un evento di notifica per la Put Area, lo leghiamo all'OVERLAPPED
     // if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
@@ -598,7 +598,7 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
 
     // ORA FUNZIONA: Passando overlappedContext, WriteFile accetta l'handle FILE_FLAG_OVERLAPPED
     // e non restituisce più FALSE a tradimento!
-    BOOL success = WriteFile(FileHandle, Buffer, Length, &bytesWritten, &overlappedContext); //
+    BOOL success = WriteFile(FileHandle, Buffer, Length, &bytesWritten, pMyOverlapped); //
 
     if (success) {
         // Caso Fast I/O sincrono fulmineo (I byte sono già nella cache di pagina)

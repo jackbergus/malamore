@@ -89,6 +89,10 @@ bool KernelStreamBuf::FlushOutput() {
     }
 #endif
 
+    // Configuri l'offset logico persistente della classe in una struttura digeribile da ZwWriteFile
+    LARGE_INTEGER byteOffsetToPass;
+    byteOffsetToPass.QuadPart = static_cast<LONGLONG>(m_WriteFileOffset); //
+
     // Invocazione della ZwWriteFile emulata che ora riceve l'evento e non fallisce più!
     NTSTATUS status = ZwWriteFile(
         m_FileHandle,
@@ -97,7 +101,7 @@ bool KernelStreamBuf::FlushOutput() {
         &ioStatus,
         m_OutputBuffer,
         static_cast<ULONG>(m_OutPtr),
-        NULL, NULL
+        &byteOffsetToPass, NULL
     ); //
 
     // Se l'I/O Manager mette la scrittura in coda asincrona
