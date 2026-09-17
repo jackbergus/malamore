@@ -107,63 +107,7 @@ NTSTATUS MalamoreIStream::ReadWithTimeout(
     ULONG* bytesActuallyRead
 ) {
     return original.ReadWithTimeout(outBuffer, bytesToRead, timeoutUs, bytesActuallyRead);
-    // if (!m_IsOpen || outBuffer == nullptr || bytesActuallyRead == nullptr || bytesToRead == 0) {
-    //     return STATUS_INVALID_PARAMETER;
-    // }
-    //
-    // *bytesActuallyRead = 0;
-    // HANDLE hFile = m_StreamBuf.GetHandle();
-    // if (hFile == NULL || hFile == (HANDLE)-1) return STATUS_INVALID_DEVICE_STATE;
-    //
-    // NTSTATUS status;
-    // IO_STATUS_BLOCK ioStatus;
-    // KEVENT ioEvent;
-    //
-    // // 1. Inizializzazione dell'evento hardware di sincronizzazione asincrona
-    // KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
-    //
-    // // 2. Lancio della lettura asincrona non bloccante
-    // // Passiamo l'indirizzo di &ioEvent. L'I/O Manager di WindowsNT metterà in coda l'IRP
-    // // e sveglierà l'evento non appena l'hardware caricherà i dati nel buffer.
-    // status = ZwReadFile(
-    //     hFile,
-    //     &ioEvent,                   // Handle dell'evento da segnalare al completamento (Ring 0)
-    //     NULL, NULL,                 // ApcRoutine, ApcContext
-    //     &ioStatus,
-    //     outBuffer,                  // Buffer lineare di ricezione passato dall'utente
-    //     bytesToRead,                // Dimensione massima richiesta
-    //     NULL,                       // Legge dalla posizione corrente del puntatore file/stream
-    //     NULL
-    // );
-    //
-    // // 3. SE L'I/O ENTRA IN CODA ASINCRONA (STATUS_PENDING)
-    // if (status == STATUS_PENDING) {
-    //     LARGE_INTEGER kernelTimeout;
-    //     // Conversione esplicita inline da microsecondi alle unità da 100ns negative del WDK
-    //     kernelTimeout.QuadPart = -(LONGLONG)(timeoutUs * 10);
-    //
-    //     // Attesa controllata: Blocca il core logico SOLO per il budget concesso dall'utente
-    //     NTSTATUS waitStatus = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, &kernelTimeout);
-    //
-    //     if (waitStatus == STATUS_TIMEOUT) {
-    //         // HARDWARE TIMEOUT COMPENSATO: La periferica o il file non hanno risposto in tempo.
-    //         // Forza l'annullamento immediato dell'IRP orfano per non lasciare descrittori corrotti nel kernel.
-    //         ZwCancelIoFile(hFile, &ioStatus);
-    //         return STATUS_TIMEOUT;
-    //     } else {
-    //         // L'evento si è svegliato prima dello scadere del timeout!
-    //         // Estraiamo il codice finale reale iniettato dall'I/O Manager nel blocco di stato.
-    //         status = ioStatus.Status;
-    //     }
-    // }
-    //
-    // // 4. VERIFICA E CONTEGGIO DEI BYTE EFFETTIVAMENTE EXTRARE
-    // if (NT_SUCCESS(status)) {
-    //     *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
-    //     return STATUS_SUCCESS;
-    // }
-    //
-    // return status;
+
 }
 
 

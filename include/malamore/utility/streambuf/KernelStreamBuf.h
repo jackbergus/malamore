@@ -25,8 +25,16 @@ private:
     size_t m_InBase;    // Puntatore all'inizio dei dati letti (gbase)
     size_t m_InPtr;     // Posizione corrente di lettura (gptr)
     size_t m_InEnd;     // Fine dei dati validi nel buffer di lettura (egptr)
-
     size_t m_OutPtr;    // Posizione corrente di scrittura (pptr)
+
+    // SPECIFICA 4: Strutture di controllo persistenti allocate nella memoria statica della classe
+    // Questo impedisce al compilatore di distruggere i descrittori hardware durante lo STATUS_PENDING
+    IO_STATUS_BLOCK m_GlobalIoStatus;
+    KEVENT          m_GlobalIoEvent;
+#ifndef LINK_KERNEL
+    // Contesto Overlapped nativo di Ring 3 legato alla vita del buffer (Non volatile!)
+    OVERLAPPED      m_GlobalOverlapped;
+#endif
 
 public:
     KernelStreamBuf();

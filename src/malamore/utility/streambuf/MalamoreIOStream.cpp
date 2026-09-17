@@ -74,7 +74,10 @@ VOID MalamoreIOStream::Close() {
 }
 
 bool MalamoreIOStream::Flush() {
-    if (m_CurrentBufferIndex == 0) return true;
+    if (m_CurrentBufferIndex == 0) {
+        m_StreamBuf.FlushOutput();
+        return true;
+    }
     // 1. Spinge i byte accumulati nella sosta locale verso l'array contiguo di KernelStreamBuf
 
     bool success = m_StreamBuf.Sputn(m_OutputBuffer, m_CurrentBufferIndex);

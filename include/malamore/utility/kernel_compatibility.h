@@ -146,6 +146,9 @@
 #define FILE_ATTRIBUTE_NORMAL         0x00000080
 #endif
 
+#ifndef ASYNC_READ_TAG
+#define ASYNC_READ_TAG 0x4153594E
+#endif
 
 #define FILE_APPEND_DATA              0x00000004
 #define FILE_WRITE_DATA               0x00000002
@@ -336,9 +339,10 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         PIO_STATUS_BLOCK IoStatusBlock,
         PVOID Buffer,
         ULONG Length,
-        PLARGE_INTEGER ByteOffset,
+        PLARGE_INTEGER ByteOffset,// Usato come selettore di contesto: -1 = Asincrono Puro, NULL = Sincrono/Bloccante
         PULONG Key
     ) {
+#ifdef PREVDEF
         UNREFERENCED_PARAMETER(Event);
         UNREFERENCED_PARAMETER(ApcRoutine);
         UNREFERENCED_PARAMETER(ApcContext);
@@ -351,7 +355,6 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
 
         // Estrae la struttura KEVENT reale passata dal modulo
         PKEVENT pKernelEvent = reinterpret_cast<PKEVENT>(Event);
-
         // Allocazione localizzata nello stack della maschera asincrona nativa di Win32
         OVERLAPPED overlappedContext;
         RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
@@ -359,6 +362,21 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         // Se lo stream ha configurato un evento di notifica, lo leghiamo al contesto Overlapped
         if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
             overlappedContext.hEvent = pKernelEvent->Handle;
+        }
+
+        // 1. DETERMINAZIONE UNIFICATA DELLA NATURA DEL DESCRITTORE Win32
+        DWORD fileType = GetFileType(FileHandle); //
+        LARGE_INTEGER currentFilePointer = { 0 };
+        // Se si tratta di un file regolare sul disco (FILE_TYPE_DISK), Windows NT Overlapped
+        // esige che l'offset sia estratto e dichiarato manualmente ad ogni transazione!
+        if (fileType == FILE_TYPE_DISK) { //
+            // Estrae la posizione logica corrente del cursore memorizzata nell'handle
+            currentFilePointer.QuadPart = 0;
+            currentFilePointer.LowPart = SetFilePointer(FileHandle, 0, &currentFilePointer.HighPart, FILE_CURRENT); //
+
+            // Iniettiamo l'offset esatto richiesto dall'I/O Manager
+            overlappedContext.Offset = currentFilePointer.LowPart;
+            overlappedContext.OffsetHigh = currentFilePointer.HighPart;
         }
 
         DWORD bytesRead = 0;
@@ -370,6 +388,13 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         if (success) {
             IoStatusBlock->Information = bytesRead;
             IoStatusBlock->Status = STATUS_SUCCESS;
+
+            // SE IL FILE È SU DISCO: Spostiamo in avanti il cursore Win32 in modalità atomica,
+            // emulando fedelmente l'avanzamento automatico nativo di Linux e del WDK!
+            if (fileType == FILE_TYPE_DISK && bytesRead > 0) { //
+                LARGE_INTEGER moveOffset; moveOffset.QuadPart = bytesRead;
+                SetFilePointer(FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT); //
+            }
             return STATUS_SUCCESS;
         }
 
@@ -380,6 +405,10 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         // Lo traduciamo istantaneamente in STATUS_PENDING sbloccando ZwReadFile!
         if (lastError == ERROR_IO_PENDING) {
             IoStatusBlock->Status = STATUS_PENDING;
+
+            // Nelle operazioni asincrone differite pendenti, il riallineamento dell'offset
+            // verrà finalizzato dalla successiva GetOverlappedResult o KeWaitForSingleObject.
+            // Per i test sequenziali ordinari a 1 carattere, il Fast I/O passa sempre dal ramo sopra.
             return STATUS_PENDING; // <--- RISOLUTIVO: ZwReadFile ritorna subito e non si pianta più!
         }
 
@@ -387,6 +416,76 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         IoStatusBlock->Information = 0;
         IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
         return STATUS_UNSUCCESSFUL;
+#else
+UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERENCED_PARAMETER(ByteOffset);
+        if (FileHandle == NULL || FileHandle == INVALID_HANDLE_VALUE || IoStatusBlock == NULL || Buffer == NULL) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        PKEVENT pKernelEvent = reinterpret_cast<PKEVENT>(Event);
+        OVERLAPPED overlappedContext;
+        RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
+
+        if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
+            overlappedContext.hEvent = pKernelEvent->Handle;
+        }
+
+        // 1. GESTIONE MANUALE DELL'OFFSET PER I FILE SU DISCO
+        DWORD fileType = GetFileType(FileHandle);
+        LARGE_INTEGER currentFilePointer = { 0 };
+
+        if (fileType == FILE_TYPE_DISK) {
+            currentFilePointer.QuadPart = 0;
+            currentFilePointer.LowPart = SetFilePointer(FileHandle, 0, &currentFilePointer.HighPart, FILE_CURRENT);
+            overlappedContext.Offset = currentFilePointer.LowPart;
+            overlappedContext.OffsetHigh = currentFilePointer.HighPart;
+        }
+
+        DWORD bytesRead = 0;
+        BOOL success = ReadFile(FileHandle, Buffer, Length, &bytesRead, &overlappedContext);
+
+        if (success) {
+            IoStatusBlock->Information = bytesRead;
+            IoStatusBlock->Status = STATUS_SUCCESS;
+
+            if (fileType == FILE_TYPE_DISK && bytesRead > 0) {
+                LARGE_INTEGER moveOffset; moveOffset.QuadPart = bytesRead;
+                SetFilePointer(FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
+            }
+            return STATUS_SUCCESS;
+        }
+
+        DWORD lastError = GetLastError();
+
+        if (lastError == ERROR_IO_PENDING) {
+            // VERIFICA DEL CONTESTO SEMANTICO TRAMITE IL TAG KEY PROTETTO
+            if (Key != nullptr && *Key == ASYNC_READ_TAG) {
+                // CASO A: LETTURA ASINCRONA PURA (ReadWithTimeout)
+                // Ritorna immediatamente STATUS_PENDING, delegando l'attesa oraria esterna
+                IoStatusBlock->Status = STATUS_PENDING;
+                IoStatusBlock->Information = 0;
+                return STATUS_PENDING;
+            } else {
+                // CASO B: LETTURA SINCRONA COMPENSATA (Sgetn_Blocking / Sgetc)
+                // Forza l'attesa immediata e scarica i byte, risolvendo il bug della 't' fissa
+                DWORD bytesTransferred = 0;
+                if (GetOverlappedResult(FileHandle, &overlappedContext, &bytesTransferred, TRUE)) {
+                    IoStatusBlock->Information = bytesTransferred;
+                    IoStatusBlock->Status = STATUS_SUCCESS;
+
+                    if (fileType == FILE_TYPE_DISK && bytesTransferred > 0) {
+                        LARGE_INTEGER moveOffset; moveOffset.QuadPart = bytesTransferred;
+                        SetFilePointer(FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
+                    }
+                    return STATUS_SUCCESS;
+                }
+            }
+        }
+
+        IoStatusBlock->Information = 0;
+        IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
+        return STATUS_UNSUCCESSFUL;
+#endif
     }
 
     inline NTSTATUS ZwWriteFile(
@@ -400,6 +499,7 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
         PVOID ByteOffset,
         PULONG Key
     ) {
+#ifdef PREVDEF
         UNREFERENCED_PARAMETER(Event);
         UNREFERENCED_PARAMETER(ApcRoutine);
         UNREFERENCED_PARAMETER(ApcContext);
@@ -421,6 +521,54 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
         }
+#else
+    UNREFERENCED_PARAMETER(ApcRoutine);
+    UNREFERENCED_PARAMETER(ApcContext);
+    UNREFERENCED_PARAMETER(ByteOffset);
+    UNREFERENCED_PARAMETER(Key);
+
+    if (FileHandle == NULL || FileHandle == INVALID_HANDLE_VALUE || IoStatusBlock == NULL || Buffer == NULL) {
+        return STATUS_INVALID_PARAMETER; //
+    }
+
+    // Estrae l'oggetto KEVENT finto dal parametro astratto
+    PKEVENT pKernelEvent = reinterpret_cast<PKEVENT>(Event);
+
+    // Allocazione di sbarramento per il contesto asincrono di Win32
+    OVERLAPPED overlappedContext;
+    RtlZeroMemory(&overlappedContext, sizeof(OVERLAPPED));
+
+    // Se lo stream ha configurato un evento di notifica per la Put Area, lo leghiamo all'OVERLAPPED
+    if (pKernelEvent != nullptr && pKernelEvent->Handle != NULL) {
+        overlappedContext.hEvent = pKernelEvent->Handle; //
+    }
+
+    DWORD bytesWritten = 0;
+
+    // ORA FUNZIONA: Passando overlappedContext, WriteFile accetta l'handle FILE_FLAG_OVERLAPPED
+    // e non restituisce più FALSE a tradimento!
+    BOOL success = WriteFile(FileHandle, Buffer, Length, &bytesWritten, &overlappedContext); //
+
+    if (success) {
+        // Caso Fast I/O sincrono fulmineo (I byte sono già nella cache di pagina)
+        IoStatusBlock->Information = bytesWritten; //
+        IoStatusBlock->Status = STATUS_SUCCESS; //
+        return STATUS_SUCCESS; //
+    }
+
+    DWORD lastError = GetLastError();
+
+    // Se l'operazione di scrittura viene presa in carico in background dall'I/O Manager
+    if (lastError == ERROR_IO_PENDING) {
+        IoStatusBlock->Information = 0; //
+        IoStatusBlock->Status = STATUS_PENDING; //
+        return STATUS_PENDING; // Mappatura nativa e corretta di Ring 0!
+    }
+
+    IoStatusBlock->Information = 0; //
+    IoStatusBlock->Status = STATUS_UNSUCCESSFUL; //
+    return STATUS_UNSUCCESSFUL; //
+#endif
     }
 
     inline void KeDelayExecutionThread(char WaitMode, BOOLEAN Alertable, LARGE_INTEGER* Interval) {
@@ -545,6 +693,28 @@ inline NTSTATUS KeWaitForSingleObject(PVOID Object, char WaitReason, char WaitMo
     if (waitResult == WAIT_TIMEOUT) return STATUS_TIMEOUT;
     if (waitResult == WAIT_OBJECT_0) return STATUS_SUCCESS;
     return STATUS_UNSUCCESSFUL;
+}
+
+/**
+     * Mappatura unificata di ZwFlushBuffersFile per lo spazio utente (Ring 3)
+     * Costringe il sistema operativo a scaricare i blocchi di cache sul silicio del disco
+     */
+inline NTSTATUS ZwFlushBuffersFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusBlock) {
+    if (FileHandle == NULL || FileHandle == INVALID_HANDLE_VALUE || IoStatusBlock == NULL) {
+        return STATUS_INVALID_PARAMETER; //
+    }
+
+    // Forza Windows NT ad evacuare la cache logica sui piatti fisici dell'SSD
+    BOOL success = FlushFileBuffers(FileHandle); //
+
+    if (success) {
+        IoStatusBlock->Status = STATUS_SUCCESS;
+        IoStatusBlock->Information = 0;
+        return STATUS_SUCCESS; //
+    } else {
+        IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
+        return STATUS_UNSUCCESSFUL; //
+    }
 }
 
 // Abilitiamo il comando di annullamento dell'I/O asincrono per lo spazio utente

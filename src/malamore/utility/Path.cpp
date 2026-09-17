@@ -28,9 +28,19 @@ void MalamorePath::AnalyzePathContext() {
     // Se non ha i prefissi, controlliamo se è un nome nudo di un driver senza lettere di volume (es: "FSCC0")
     size_t len = 0;
     RtlStringCchLengthW(m_Buffer, MAX_PATH, &len);
-    if (len > 0 && wcschr(m_Buffer, L':') == nullptr && wcschr(m_Buffer, L'\\') == nullptr && wcschr(m_Buffer, L'/') == nullptr) {
-        m_IsHardwareDevice = TRUE; // È un driver di periferica implicito
-    }
+
+    if (len > 0 && wcschr(m_Buffer, L':') == nullptr &&
+                   wcschr(m_Buffer, L'\\') == nullptr &&
+                   wcschr(m_Buffer, L'/') == nullptr) {
+
+        // CORREZIONE CRITICA: Se la stringa contiene un punto (es: "QualsiasiNomeFile.txt"),
+        // significa che ha un'estensione ed è TASSATIVAMENTE un file regolare, non un device link!
+        if (wcschr(m_Buffer, L'.') != nullptr) {
+            m_IsHardwareDevice = FALSE; // File regolare confermato
+        } else {
+            m_IsHardwareDevice = TRUE;  // È un driver di periferica implicito (es: "FSCC0")
+        }
+                   }
 }
 
 void MalamorePath::normalize() {
