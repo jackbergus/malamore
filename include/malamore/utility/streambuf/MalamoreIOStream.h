@@ -39,12 +39,55 @@ public:
     NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
     BOOLEAN IsOpen() const { return m_IsOpen; }
+    // Overload degli operatori fluidi esenti da STL
+    bool Sputn(const char* s, size_t count) {
+        return m_StreamBuf.Sputn(s, count);
+    }
 
     // Scrittura fluida Zero-STL
     MalamoreIOStream& operator<<(const char* str);
     MalamoreIOStream& operator<<(char c);
     MalamoreIOStream& operator<<(ULONG value);
     MalamoreIOStream& operator<<(MalamoreIOStream& (*manipulator)(MalamoreIOStream&));
+    MalamoreIOStream& operator<<(ULONG64 value) {
+        char temp[64]; RtlZeroMemory(temp, sizeof(temp));
+        if (NT_SUCCESS(RtlStringCchPrintfA(temp, 64, "%I64u", value))) AppendString(temp);
+        return *this;
+    }
+    MalamoreIOStream& operator<<(const WCHAR* wstr) {
+        if (wstr == nullptr) return *this;
+        size_t len = 0;
+        if (NT_SUCCESS(RtlStringCchLengthW(wstr, STREAM_BUFFER_SIZE, &len))) {
+            for (size_t i = 0; i < len; ++i) {
+                m_StreamBuf.Sputc(static_cast<char>(wstr[i]));
+            }
+        }
+        return *this;
+    }
+    MalamoreIOStream& operator>>(char& c) {
+        int ch = m_StreamBuf.Sbumpc();
+        c = (ch != -1) ? static_cast<char>(ch) : '\0';
+        return *this;
+    }
+
+    MalamoreIOStream& operator>>(ULONG& value) {
+        value = 0;
+        int ch = m_StreamBuf.Sgetc();
+
+        // Salta eventuali spazi o ritorni a capo iniziali
+        while (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            m_StreamBuf.Sbumpc();
+            ch = m_StreamBuf.Sgetc();
+        }
+
+        // Accumula i caratteri numerici validi
+        while (ch >= '0' && ch <= '9') {
+            value = (value * 10) + (ch - '0');
+            m_StreamBuf.Sbumpc();
+            ch = m_StreamBuf.Sgetc();
+        }
+        return *this;
+    }
 
     // Lettura asincrona temporizzata e bloccante nativa (Valida in Ring 0 e Ring 3)
     NTSTATUS ReadWithTimeout(VOID* outBuffer, ULONG bytesToRead, ULONG timeoutUs, ULONG* bytesActuallyRead);
@@ -54,6 +97,9 @@ public:
     // METODO RISOLUTIVO: GetLine asincrona protetta post-timeout
     // =========================================================================
     size_t GetLine(char* buffer, size_t maxCount, char delimiter = '\n');
+    int Get() {
+        return m_StreamBuf.Sbumpc();
+    }
 };
 
 inline MalamoreIOStream& endl(MalamoreIOStream& os) { os << "\r\n"; return os; }

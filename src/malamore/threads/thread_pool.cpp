@@ -14,7 +14,7 @@
 
 // Allocazione statica contigua nel segmento dati (Zero heap runtime - Specifica 4)
 static CorePoolRegistry g_PoolRegistry;
-static MalamorePath     telemetryFilePath{L"\\SystemRoot\\Malamore_Telemetry_Sink.txt"};
+static MalamorePath     telemetryFilePath{L"C:\\a01\\Malamore_Telemetry_Sink.txt"};
 static MalamoreOStream  telemetryFile;
 static LARGE_INTEGER freq;
 static LARGE_INTEGER currentTicks;
@@ -34,6 +34,7 @@ extern "C" VOID dumpBinaryTelemetryToFile() {
         RealTimeIPC_Pop(&g_PoolRegistry.TelemetryChannel);
         msg = RealTimeIPC_Top(&g_PoolRegistry.TelemetryChannel);
     }
+    telemetryFile.Flush();
 }
 
 extern "C" NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {

@@ -514,6 +514,15 @@ inline void KeRevertToUserGroupAffinityThread(PGROUP_AFFINITY PreviousAffinity) 
     }
 }
 
+/**
+ * Mappatura speculare di KeQueryActiveProcessorCountEx per lo spazio utente (Ring 3)
+ */
+inline ULONG KeQueryActiveProcessorCountEx(USHORT GroupNumber) {
+    // Se il modulo richiede ALL_PROCESSOR_GROUPS (0xFFFF), GetActiveProcessorCount
+    // accetta lo stesso identico valore per restituire il totale globale dei core logici del sistema.
+    return GetActiveProcessorCount(GroupNumber);
+}
+
 inline NTSTATUS KeWaitForSingleObject(PVOID Object, char WaitReason, char WaitMode, BOOLEAN Alertable, LARGE_INTEGER* Timeout) {
     UNREFERENCED_PARAMETER(WaitReason);
     UNREFERENCED_PARAMETER(WaitMode);
@@ -545,6 +554,24 @@ inline NTSTATUS KeWaitForSingleObject(PVOID Object, char WaitReason, char WaitMo
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+
+#ifndef ALL_PROCESSOR_GROUPS
+#define ALL_PROCESSOR_GROUPS 0xFFFF
+#endif
+
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+
+static __inline LONG KernelAtomicRead(volatile LONG* Target) {
+    return InterlockedOr(const_cast<LONG*>(Target), 0);
+}
 
 /**
  * Converte un codice NTSTATUS nella sua stringa letterale corrispondente.
@@ -581,28 +608,5 @@ inline const char* NtStatusToString(NTSTATUS status) {
     }
 }
 
-#ifndef ALL_PROCESSOR_GROUPS
-#define ALL_PROCESSOR_GROUPS 0xFFFF
-#endif
-
-/**
- * Mappatura speculare di KeQueryActiveProcessorCountEx per lo spazio utente (Ring 3)
- */
-inline ULONG KeQueryActiveProcessorCountEx(USHORT GroupNumber) {
-    // Se il modulo richiede ALL_PROCESSOR_GROUPS (0xFFFF), GetActiveProcessorCount
-    // accetta lo stesso identico valore per restituire il totale globale dei core logici del sistema.
-    return GetActiveProcessorCount(GroupNumber);
-}
-
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif
-
-static __inline LONG KernelAtomicRead(volatile LONG* Target) {
-    return InterlockedOr(const_cast<LONG*>(Target), 0);
-}
 
 #endif //MALAMORE_KERNEL_COMPATIBILITY_H

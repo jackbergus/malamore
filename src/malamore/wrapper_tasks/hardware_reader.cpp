@@ -69,7 +69,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         if (status == STATUS_SUCCESS) {
             const ULONG64 Timestamp = (((LARGE_INTEGER *) &currentTime)->QuadPart * 1000000ULL) / ((struct UnifiedThreadContext
                               *) Context)->PerfCounterFrequency;
-            status = CorePool_RouteMessageSrcToDest(Timestamp, HARDWARE_READER_ID, Context->TargetThreadId, idata, bytesActuallyRead);
+            status = CorePool_RouteMessageSrcToDest(Timestamp, Context->ProcessId, Context->TargetThreadId, idata, bytesActuallyRead);
             if (!NT_SUCCESS(status)) {
                 KdPrint(("There was an issue while attempting to send the response at time %llu\n", Timestamp));
             }
@@ -77,7 +77,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         else if (status == STATUS_TIMEOUT) {
             // Timeout, continuing to navigate the system
         } else {
-            KdPrint(("ERROR: there was an error on the driver state, that does not allow me to continue reading"));
+            KdPrint(("ERROR: %s does not allow me to continue reading: \n", NtStatusToString(status)));
         }
         if (&nextPeriodTime)
             ((LARGE_INTEGER *) &nextPeriodTime)->QuadPart += ((ULONG64) periodTicks);

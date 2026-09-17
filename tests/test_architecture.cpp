@@ -32,7 +32,7 @@ TEST_CASE("BASIC_ARCHITECTURE") {
     REQUIRE(NT_SUCCESS(hardwarePipeServer.Create(L"HWDriverSimulator", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
     REQUIRE(NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected2, &result)));
     auto devicePath = hardwarePipeServer.GetPath().wstring();
-    auto status = CorePool_InitializeRegistry(75);
+    auto status = CorePool_InitializeRegistry(75); // The main task is actually activated here
     REQUIRE(NT_SUCCESS(status));
     status = CorePool_RegisterHwReader(devicePath,3000, 3333, TELEMETRY_WRITER_ID);
     REQUIRE(NT_SUCCESS(status));
@@ -43,7 +43,6 @@ TEST_CASE("BASIC_ARCHITECTURE") {
     // Waiting for five seconds before starting simuilating the hardware sending signals
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-// #if 0
     for (uint64_t t = 0; t < 100; t++) {
         // Simulating the driver sending messages constantly at 3 millisecond rate
         std::this_thread::sleep_for(std::chrono::milliseconds(3));
@@ -52,7 +51,6 @@ TEST_CASE("BASIC_ARCHITECTURE") {
         // Expecting that I am actually writing something
         REQUIRE(strlen(output_buffer) == result);
     }
-// #endif
 
 
 

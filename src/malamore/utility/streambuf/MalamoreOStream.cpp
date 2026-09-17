@@ -8,118 +8,42 @@
 
 #include "malamore/utility/streambuf/MalamoreOStream.h"
 
-MalamoreOStream::MalamoreOStream() : m_IsOpen(FALSE) {
-    RtlZeroMemory(&m_UnicodePath, sizeof(UNICODE_STRING));
-    RtlZeroMemory(m_SavedPath, sizeof(m_SavedPath));
+MalamoreOStream::MalamoreOStream()  {
+
 }
 
 MalamoreOStream::~MalamoreOStream() {
-    if (m_IsOpen) Close();
+    original.Close();
 }
 
 NTSTATUS MalamoreOStream::Open(const MalamorePath& path, ULONG flags) {
-    if (m_IsOpen) return STATUS_SUCCESS;
-    if (path.empty()) return STATUS_INVALID_PARAMETER;
-
-    NTSTATUS status;
-    IO_STATUS_BLOCK ioStatus;
-    OBJECT_ATTRIBUTES objAttr;
-    HANDLE hFile = NULL;
-
-    status = RtlStringCchCopyW(m_SavedPath, MAX_PATH, path.ToPath(m_SavedPath, MAX_PATH));
-    if (!NT_SUCCESS(status)) return status;
-
-    RtlInitUnicodeString(&m_UnicodePath, m_SavedPath);
-    InitializeObjectAttributes(&objAttr, &m_UnicodePath, OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE, NULL, NULL);
-
-    // =========================================================================
-    // MOTORE DI TRADUZIONE: DA LOGICA BITMASK POSIX A STRATO HARDWARE WINDOWS NT
-    // =========================================================================
-    // ACCESS_MASK desiredAccess = SYNCHRONIZE;
-    ULONG nativeDisposition = 0;
-
-
-    // bool isAppend = (flags & StreamFlags::Append) == StreamFlags::Append;
-    bool isHW = path.is_hardware_device();
-    ACCESS_MASK desiredAccess = isHW ? SYNCHRONIZE : 0;
-
-    // 1. Risoluzione dei flag di Accesso (Read, Write, Append)
-    if (flags & StreamFlags::Append) {
-        desiredAccess |= FILE_APPEND_DATA;
-    } else if (flags & StreamFlags::Write) {
-        desiredAccess |= isHW ? GENERIC_WRITE : FILE_WRITE_DATA;
-    }
-    if (flags & StreamFlags::Read) {
-        desiredAccess |= isHW ? GENERIC_READ : FILE_READ_DATA;
-    }
-
-    // 2. Risoluzione ortogonale delle regole di Creazione e Troncamento (Creat, Trunc)
-    if (flags & StreamFlags::Trunc) {
-        // Se richiede troncamento, equivale a forzare la sovrascrittura totale (FILE_SUPERSEDE)
-        nativeDisposition = FILE_SUPERSEDE; //0x00000000; // FILE_SUPERSEDE nel WDK
-    } else if (flags & StreamFlags::Creat) {
-        // Se la creazione è attiva ma non si vuole troncare, equivale ad aprire o creare (FILE_OPEN_IF)
-        nativeDisposition = FILE_OPEN_IF; // FILE_OPEN_IF nel WDK
-    } else {
-        // Se la creazione non è richiesta, il file deve tassativamente già esistere (FILE_OPEN)
-        nativeDisposition = FILE_OPEN; // FILE_OPEN nel WDK
-    }
-
-    status = ZwCreateFile(&hFile, desiredAccess, &objAttr, &ioStatus, NULL,
-                          FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE, nativeDisposition, FILE_NON_DIRECTORY_FILE, NULL, 0);
-
-    if (NT_SUCCESS(status)) {
-        m_StreamBuf.AttachHandle(hFile);
-        m_IsOpen = TRUE;
-    }
-    return status;
+    return original.Open(path, flags);
 }
 
 VOID MalamoreOStream::Close() {
-    if (!m_IsOpen) return;
-    m_StreamBuf.FlushOutput();
-    HANDLE hFile = m_StreamBuf.GetHandle();
-    if (hFile != NULL && hFile != (HANDLE)-1) ZwClose(hFile);
-    m_StreamBuf.AttachHandle(NULL);
-    m_IsOpen = FALSE;
-}
-
-void MalamoreOStream::AppendString(const char* str) {
-    if (str == nullptr) return;
-    size_t len = 0;
-    if (NT_SUCCESS(RtlStringCchLengthA(str, STREAM_BUFFER_SIZE, &len))) {
-        m_StreamBuf.Sputn(str, len);
-    }
+    original.Close();
 }
 
 MalamoreOStream& MalamoreOStream::operator<<(const char* str) {
-    AppendString(str); return *this;
+    original << str; return *this;
 }
 
 MalamoreOStream& MalamoreOStream::operator<<(char c) {
-    m_StreamBuf.Sputc(c); return *this;
+    original << c; return *this;
 }
 
 MalamoreOStream& MalamoreOStream::operator<<(const WCHAR* wstr) {
-    if (wstr == nullptr) return *this;
-    size_t len = 0;
-    if (NT_SUCCESS(RtlStringCchLengthW(wstr, STREAM_BUFFER_SIZE, &len))) {
-        for (size_t i = 0; i < len; ++i) {
-            m_StreamBuf.Sputc(static_cast<char>(wstr[i]));
-        }
-    }
+    original << wstr;
     return *this;
 }
 
 MalamoreOStream& MalamoreOStream::operator<<(ULONG value) {
-    char temp[32]; RtlZeroMemory(temp, sizeof(temp));
-    if (NT_SUCCESS(RtlStringCchPrintfA(temp, 32, "%lu", value))) AppendString(temp);
+    original << value;
     return *this;
 }
 
 MalamoreOStream& MalamoreOStream::operator<<(ULONG64 value) {
-    char temp[64]; RtlZeroMemory(temp, sizeof(temp));
-    if (NT_SUCCESS(RtlStringCchPrintfA(temp, 64, "%I64u", value))) AppendString(temp);
+    original << value;
     return *this;
 }
 

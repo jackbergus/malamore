@@ -9,8 +9,9 @@
 //
 
 // #pragma once
-#include <malamore/utility/streambuf/StreamFlags.h>
-#include "malamore/utility/streambuf/KernelStreamBuf.h"
+#include <malamore/utility/streambuf/MalamoreIOStream.h>
+// #include <malamore/utility/streambuf/StreamFlags.h>
+// #include "malamore/utility/streambuf/KernelStreamBuf.h"
 #include "malamore/utility/Path.h"
 
 #ifdef __cplusplus
@@ -28,27 +29,30 @@
 // };
 
 class MalamoreOStream {
-private:
-    KernelStreamBuf m_StreamBuf;
-    UNICODE_STRING  m_UnicodePath;
-    WCHAR           m_SavedPath[MAX_PATH];
-    BOOLEAN         m_IsOpen;
-
-    void AppendString(const char* str);
-    void AppendInt(ULONG value);
-    void AppendInt64(ULONG64 value);
-
+// private:
+//     KernelStreamBuf m_StreamBuf;
+//     UNICODE_STRING  m_UnicodePath;
+//     WCHAR           m_SavedPath[MAX_PATH];
+//     BOOLEAN         m_IsOpen;
+//
+//     void AppendString(const char* str);
+//     void AppendInt(ULONG value);
+//     void AppendInt64(ULONG64 value);
+    MalamoreIOStream original;
 public:
     MalamoreOStream();
     ~MalamoreOStream();
 
     NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
-    BOOLEAN IsOpen() const { return m_IsOpen; }
+    BOOLEAN IsOpen() const { return original.IsOpen(); }
 
     // Overload degli operatori fluidi esenti da STL
     bool Sputn(const char* s, size_t count) {
-        return m_StreamBuf.Sputn(s, count);
+        return original.Sputn(s, count);
+    }
+    bool Flush() {
+        return original.Flush();
     }
     MalamoreOStream& operator<<(const char* str);
     MalamoreOStream& operator<<(const WCHAR* wstr);
