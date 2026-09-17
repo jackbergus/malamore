@@ -12,7 +12,7 @@
 
 #ifdef __cplusplus
 
-#define STREAM_BUFFER_SIZE 1024
+#define STREAM_BUFFER_SIZE      (8024)
 
 class KernelStreamBuf {
 private:

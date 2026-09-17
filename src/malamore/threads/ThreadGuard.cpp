@@ -14,8 +14,6 @@ ThreadGuard::ThreadGuard(struct UnifiedThreadInterface* threadSlot, PFN_FUTURE_T
     if (this->fields.Slot != nullptr) {
         this->fields.Slot->ThreadHandle = NULL;
         this->fields.Slot->IsCompleted = 0;
-        RtlZeroMemory(&this->fields.Slot->Context, sizeof(struct UnifiedThreadContext));
-        RtlZeroMemory(&this->fields.Slot->FutureResult, sizeof(struct FutureResultParcel));
     }
 }
 
@@ -32,8 +30,6 @@ void ThreadGuard::Init(struct UnifiedThreadInterface *threadSlot, PFN_FUTURE_THR
         if (this->fields.Slot != nullptr) {
             this->fields.Slot->ThreadHandle = NULL;
             this->fields.Slot->IsCompleted = 0;
-            RtlZeroMemory(&this->fields.Slot->Context, sizeof(struct UnifiedThreadContext));
-            RtlZeroMemory(&this->fields.Slot->FutureResult, sizeof(struct FutureResultParcel));
         }
     }
 }

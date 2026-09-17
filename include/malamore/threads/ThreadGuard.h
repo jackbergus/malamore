@@ -8,26 +8,19 @@
 // Created by Giacomo Bergami on 16/09/2026.
 //
 
-
-#include "malamore/threads/thread_shared.h"
+#include "thread_shared.h"
 #include "malamore/utility/kernel_compatibility.h"
 // #include "malamore/pool_core.h" // Per importare la definizione di UnifiedThreadContext
 
 
-#define FUTURE_BUFFER_SIZE 512
 
 // =========================================================================
 // PACCHETTO DI SCAMBIO STATICO AD ARCHITETTURA Ring0/Ring3 (ZERO HEAP)
 // =========================================================================
+
+
+
 #pragma pack(push, 4)
-struct FutureResultParcel {
-    UCHAR DataBuffer[FUTURE_BUFFER_SIZE]; // <--- REQUISITO: Buffer statico nativo di sosta
-    ULONG DataLength;                     // Dimensione reale espressa in byte dei dati validi
-};
-
-// Firma aggiornata della routine computazionale Real-Time del tandem o dell'I/O
-typedef void (*PFN_FUTURE_THREAD_ROUTINE)(struct UnifiedThreadContext* Context, struct FutureResultParcel* OutResult);
-
 struct ThreadBridgePayload {
     struct UnifiedThreadInterface* Slot;
     PFN_FUTURE_THREAD_ROUTINE RealRoutine;

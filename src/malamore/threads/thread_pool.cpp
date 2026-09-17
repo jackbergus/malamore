@@ -10,6 +10,7 @@
 #include "malamore/utility/telemetry_formatter.h"
 #include "malamore/utility/streambuf/MalamoreOStream.h"
 #include "malamore/wrapper_tasks/hardware_reader.h"
+#include "malamore/wrapper_tasks/telemetry_writer.h"
 
 // Allocazione statica contigua nel segmento dati (Zero heap runtime - Specifica 4)
 static CorePoolRegistry g_PoolRegistry;
@@ -26,13 +27,21 @@ extern "C" BOOL isTelemetryQueueEmpty() {
     return RealTimeIPC_IsEmpty(&g_PoolRegistry.TelemetryChannel) ? TRUE : FALSE;
 }
 
+extern "C" VOID dumpBinaryTelemetryToFile() {
+    const struct DataChannelParcel* msg = RealTimeIPC_Top(&g_PoolRegistry.TelemetryChannel);
+    if (msg) {
+        telemetryFile.Sputn(reinterpret_cast<const char *>(msg), sizeof(*msg));
+        RealTimeIPC_Pop(&g_PoolRegistry.TelemetryChannel);
+    }
+}
+
 extern "C" NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength) {
     InterProcessChannelData* pChannel;
     if (targetNodeId == TELEMETRY_WRITER_ID) {
         pChannel = &g_PoolRegistry.TelemetryChannel;
     } else {
         ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
-        pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
+        pChannel = &g_PoolRegistry.Tasks[channelIndex].IpcChannel;
     }
 
     if (RealTimeIPC_Push(pChannel, Timestamp, SourceNodeId, PayloadData, DataLength)) {
@@ -45,8 +54,7 @@ extern "C" NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceN
 
 extern "C" NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet) {
     ULONG channelIndex = Malamore::Math::WrapIndex<MAX_GENERIC_TASKS>(targetNodeId);
-    InterProcessChannelData* pChannel = &g_PoolRegistry.IpcChannels[channelIndex];
-
+    InterProcessChannelData* pChannel = &g_PoolRegistry.Tasks[channelIndex].IpcChannel;
 
     if (RealTimeIPC_Push(pChannel, packet)) {
         return STATUS_SUCCESS;
@@ -57,6 +65,25 @@ extern "C" NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct
 }
 
 
+void clear_task_and_thread(struct MalamoreThreadSlot &thread) {
+    InterlockedExchange(&thread.threadArgument.Context.KeepRunning, 0);
+    RtlZeroMemory(&thread.threadArgument.FutureResult, sizeof(thread.threadArgument.FutureResult));
+    thread.threadArgument.IsCompleted = 0;
+    thread.threadArgument.ThreadHandle = NULL;
+    thread.threadArgument.Context.TaskFunctionPointer = NULL;
+    RtlZeroMemory(&thread.threadArgument.Context.DevicePath, MAX_PATH);
+    thread.threadArgument.Context.SynchronizedStartTicks = 0;
+    thread.threadArgument.Context.PhaseOffsetTicks = 0;
+    thread.threadArgument.Context.PeriodUs = 0;
+    thread.threadArgument.Context.MaxBudgetUs = 0;
+    thread.threadArgument.Context.IsHighPriority = 1;
+    thread.threadArgument.Context.KeepRunning = 0;
+    thread.threadArgument.Context.runReadOperation = FALSE;
+    thread.threadArgument.Context.runWriteOperation = FALSE;
+    thread.threadArgument.Context.saveFileToDisk = FALSE;
+}
+
+extern "C"
 NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     NTSTATUS status;
     // Cattura istantanea della costante di frequenza hardware della macchina
@@ -75,26 +102,23 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
         coresToTarget = 4;
 
     ULONG configured = 0;
-    for (ULONG i = 1; i < activeProcessors && configured < coresToTarget && configured < MAX_TOTAL_SLOTS; ++i) {
+    for (ULONG i = 0; i < activeProcessors && configured < coresToTarget && configured < MAX_TOTAL_SLOTS; ++i) {
         KAFFINITY mask = static_cast<KAFFINITY>(1) << i;
-        RealTimeIPC_Init(&g_PoolRegistry.IpcChannels[i]);
+        auto& thread = g_PoolRegistry.ThreadPool[configured];
+        thread.BaseAffinityMask = mask;
+        thread.Type = MalamoreThreadType::THREAD_TYPE_FREE;
+        thread.SlotId = i;
+        thread.threadArgument.Context.AffinityMask = mask;
+        thread.threadArgument.Context.PerfCounterFrequency = freq.QuadPart;
+        thread.threadArgument.Context.TargetThreadId = i;
+        clear_task_and_thread(thread);
         configured++;
-        auto& slot = g_PoolRegistry.ThreadPool[configured];
-        slot.ContextA.KeepRunning = 0;
-        slot.ContextB.KeepRunning = 0;
-        slot.hThreadHandleA = NULL;
-        slot.hThreadHandleB = NULL;
-        InterlockedExchange(&slot.ContextA.KeepRunning, 0);
-        InterlockedExchange(&slot.ContextB.KeepRunning, 0);
-        slot.SlotId = i;
-        slot.BaseAffinityMask = mask;
-        slot.Type = MalamoreThreadType::THREAD_TYPE_FREE;
     }
 
     g_PoolRegistry.CurrentHwThreadsCount = configured;
     g_PoolRegistry.TerminateDiskThread = 0;
 
-    telemetryFile.Open(telemetryFilePath, StreamFlags::Trunc | StreamFlags::Creat | StreamFlags::Write);
+    status = telemetryFile.Open(telemetryFilePath, StreamFlags::Trunc | StreamFlags::Creat | StreamFlags::Write);
     RealTimeIPC_Init(&g_PoolRegistry.TelemetryChannel);
 
     // Configurazione dei contatori iniziali di controllo per la flotta omogenea
@@ -104,34 +128,123 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     g_PoolRegistry.IsRegistryActive = TRUE; // TRUE
     g_PoolRegistry.TerminateDiskThread = 0;
 
-    // TODO:
-    // // =========================================================================
-    // // STEP 4: AVVIO DEL THREAD PARALLELO A PRIORITÀ PASSIVA DEL DISK WRITER
-    // // =========================================================================
-    // // Crea il System Thread di background vincolato al processo protetto "System"
-    // KdPrint(("[MALAMORE DRIVER] Creating telemetry thread\n"));
-    // status = PsCreateSystemThread(
-    //     &g_PoolRegistry.hDiskThread,     // _Out_ PHANDLE ThreadHandle
-    //     THREAD_ALL_ACCESS,               // _In_ ACCESS_MASK DesiredAccess
-    //     NULL,                            // _In_opt_ POBJECT_ATTRIBUTES ObjectAttributes
-    //     NULL,                            // _In_opt_ HANDLE ProcessHandle (NULL = System Process)
-    //     NULL,                            // _Out_opt_ PCLIENT_ID ClientId
-    //     DiskWriterThreadRoutine,         // _In_ PKSTART_ROUTINE StartRoutine
-    //     NULL                             // _In_opt_ PVOID StartContext
-    // );
-    //
-    // if (!NT_SUCCESS(status)) {
-    //     // Se lo spawn fallisce, esegue il rollback chiudendo l'handle del file aperto
-    //     ZwClose(g_PoolRegistry.hFileHandle);
-    //     g_PoolRegistry.hFileHandle = NULL;
-    //     g_PoolRegistry.hDiskThread = NULL;
-    //     g_PoolRegistry.IsRegistryActive = FALSE;
-    //     KdPrint(("[MALAMORE DRIVER] Not enough resources to create the telemetry thread\n"));
-    //     return STATUS_INSUFFICIENT_RESOURCES;
-    // }
-
     // Ritorna il successo: l'infrastruttura statica è pronta a ricevere le registrazioni dei nodi
     return STATUS_SUCCESS;
+}
+
+extern "C"
+NTSTATUS CorePool_RegisterHwReader(
+    const WCHAR* devicePath,
+    ULONG readTimeoutUs,
+    ULONG samplingPeriodUs,
+    ULONG targetTaskId
+) {
+    if (g_PoolRegistry.IsRegistryActive == 0) {
+        KdPrint(("[CorePool_RegisterHwReader] Inactive registry, cannot continue with registering an HW reader \n"));
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
+    struct MalamoreThreadSlot* slot = nullptr;
+    struct MalamoreTaskSlot* task = nullptr;
+    for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
+        // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
+        if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
+            slot = &g_PoolRegistry.ThreadPool[i];
+            task = &g_PoolRegistry.Tasks[i];
+            break;
+        }
+    }
+
+    // Se l'array statico unificato pre-allocato è saturo, respinge la richiesta per proteggere il sistema
+    if ((!slot) || (!task)) {
+        KdPrint(("[CorePool_RegisterGenericTask] It seems that all threads in the pool are locked. I cannot do anything more. \n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    slot->Type = THREAD_TYPE_HW_READER;
+    slot->BaseAffinityMask = slot->BaseAffinityMask;
+    task->ContextAB[0] = slot;
+    auto* ctx = &slot->threadArgument.Context;
+    // struct UnifiedThreadContext* ctx = &slot->ContextA;
+    // slot->ProcessId = slot->SlotId;
+    ctx->PeriodUs = samplingPeriodUs;
+    ctx->MaxBudgetUs = readTimeoutUs;
+    ctx->TargetThreadId = targetTaskId;
+    ctx->TaskFunctionPointer = HardwareReaderThreadRoutine;
+
+    // CORREZIONE HARDWARE: Utilizziamo la funzione sicura del kernel per copiare la stringa WCHAR
+    // Sostituisce wcscpy_s dello spazio utente
+    NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
+    if (!NT_SUCCESS(strStatus)) {
+        KdPrint(("[CorePool_RegisterHwReader] Cannot copy the devicePath to ctx->DevicePath \n"));
+        return strStatus;
+    }
+
+    ctx->KeepRunning = 0;
+    ctx->PhaseOffsetTicks = 0;
+
+    g_PoolRegistry.CurrentHwThreadsCount++;
+    g_PoolRegistry.TotalAllocatedSlots++;
+    return STATUS_SUCCESS;
+}
+
+extern "C"
+NTSTATUS CorePool_StartPoolExecution() {
+    NTSTATUS status = STATUS_SUCCESS;
+    LARGE_INTEGER freq, currentTicks;
+
+    // Cattura istantanea della costante di frequenza hardware della macchina
+    currentTicks = KeQueryPerformanceCounter(&freq);
+
+    // Calcolo della Barriera Oraria Unica Globale (Tempo Attuale + 1ms di rincorsa)
+    // Questo millisecondo fornisce il budget di tempo necessario alla CPU per completare
+    // i cambi di contesto e posizionare i thread sui core corretti prima dello scatto in fase.
+    ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
+    g_PoolRegistry.GlobalSynchronizedStartTicks = synchronizedStart;
+    g_PoolRegistry.GlobalPerfCounterFrequency = freq.QuadPart;
+
+    for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
+        // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
+        if (g_PoolRegistry.ThreadPool[i].Type != THREAD_TYPE_FREE) {
+            auto* slot = &g_PoolRegistry.ThreadPool[i];
+            auto* task = &g_PoolRegistry.Tasks[i];
+
+            switch (slot->Type) {
+                case THREAD_TYPE_TELEMETRY_WRITER:
+                case THREAD_TYPE_HW_READER: {
+                    struct UnifiedThreadContext* ctx = &task->ContextAB[0]->threadArgument.Context;
+                    ctx->SynchronizedStartTicks = synchronizedStart;
+                    ctx->PerfCounterFrequency = freq.QuadPart;
+                    ctx->KeepRunning = 1;
+
+                    // Tentativo di spawn del System Thread
+                    auto& t = task->ContextAB[0]->actualThread;
+                    t.Init(&task->ContextAB[0]->threadArgument, TelemetrySink);
+                    status = t.Start();
+
+                    // VERIFICA RIGIDA DI INTEGRITÀ DI SPATIAL SPAWN
+                    if (!NT_SUCCESS(status)) {
+                        KdPrint(("[MALAMORE 🚨] Fallimento spawn Thread HW allo slot %lu. Status: 0x%X. Avvio Rollback...\n", i, status));
+                        t.Stop();
+
+                        // Interrompe bruscamente il boot e distrugge tutto l'armamento parziale configurato fino ad ora
+                        // TODO: CorePool_ShutdownAndClear();
+                        // TODO: return status;
+                    }
+                }
+                    break;
+                case THREAD_TYPE_GENERIC_TASK: {
+                    // TODO
+                }
+                    break;
+
+                default: continue;
+            }
+
+        }
+    }
+    return status;
 }
 
 #if INCLUDE_UNTESTED_FEATURES
@@ -163,60 +276,7 @@ extern "C" VOID DiskWriterThreadRoutine(_In_ PVOID Context);
 
 
 // SPECIFICA 2: Metodo dedicato all'inizializzazione del thread Hardware
-NTSTATUS CorePool_RegisterHwReader(
-    ULONG64 processId,
-    const WCHAR* devicePath,
-    ULONG readTimeoutUs,
-    ULONG samplingPeriodUs,
-    KAFFINITY coreAffinityMask,
-    ULONG targetTaskId
-) {
-    if (g_PoolRegistry.IsRegistryActive == 0) {
-        KdPrint(("[CorePool_RegisterHwReader] Inactive registry, cannot continue with registering an HW reader \n"));
-        return STATUS_INVALID_DEVICE_STATE;
-    }
 
-    // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
-    struct MalamoreThreadSlot* slot = nullptr;
-    for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
-        // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
-        if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
-            slot = &g_PoolRegistry.ThreadPool[i];
-            break;
-        }
-    }
-
-    // Se l'array statico unificato pre-allocato è saturo, respinge la richiesta per proteggere il sistema
-    if (!slot) {
-        KdPrint(("[CorePool_RegisterGenericTask] It seems that all threads in the pool are locked. I cannot do anything more. \n"));
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-
-    slot->Type = THREAD_TYPE_HW_READER;
-    slot->BaseAffinityMask = coreAffinityMask;
-
-    struct UnifiedThreadContext* ctx = &slot->ContextA;
-    ctx->ProcessId = processId;
-    ctx->PeriodUs = samplingPeriodUs;
-    ctx->MaxBudgetUs = readTimeoutUs;
-    ctx->AffinityMask = slot->BaseAffinityMask;
-    ctx->TargetThreadId = targetTaskId;
-
-    // CORREZIONE HARDWARE: Utilizziamo la funzione sicura del kernel per copiare la stringa WCHAR
-    // Sostituisce wcscpy_s dello spazio utente
-    NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
-    if (!NT_SUCCESS(strStatus)) {
-        KdPrint(("[CorePool_RegisterHwReader] Cannot copy the devicePath to ctx->DevicePath \n"));
-        return strStatus;
-    }
-
-    ctx->KeepRunning = 0;
-    ctx->PhaseOffsetTicks = 0;
-
-    g_PoolRegistry.CurrentHwThreadsCount++;
-    g_PoolRegistry.TotalAllocatedSlots++;
-    return STATUS_SUCCESS;
-}
 
 
 // SPECIFICA 2: Metodo dedicato all'inizializzazione del Generic Task (Tandem)
@@ -245,7 +305,7 @@ NTSTATUS CorePool_RegisterGenericTask(
     }
 
     // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
-    struct MalamoreThreadSlot* targetSlot = nullptr;
+    struct MalamoreTaskSlot* targetSlot = nullptr;
     for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
         // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
         if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
@@ -329,7 +389,7 @@ NTSTATUS CorePool_StartPoolExecution() {
 
     // Scansione sequenziale del pool omogeneo statico
     for (ULONG i = 0; i < g_PoolRegistry.TotalAllocatedSlots; ++i) {
-        struct MalamoreThreadSlot* slot = &g_PoolRegistry.ThreadPool[i];
+        struct MalamoreTaskSlot* slot = &g_PoolRegistry.ThreadPool[i];
 
         // =========================================================================
         // CASO 1: INNESCO THREAD DI CATTURA HARDWARE (PASSIVE_LEVEL REAL-TIME)
@@ -526,7 +586,7 @@ VOID CorePool_ShutdownAndClear() {
     g_PoolRegistry.IsRegistryActive = 0;
 
     for (ULONG i = 0; i < g_PoolRegistry.TotalAllocatedSlots; ++i) {
-        struct MalamoreThreadSlot* slot = &g_PoolRegistry.ThreadPool[i];
+        struct MalamoreTaskSlot* slot = &g_PoolRegistry.ThreadPool[i];
 
         InterlockedExchange(&slot->ContextA.KeepRunning, 0);
         InterlockedExchange(&slot->ContextB.KeepRunning, 0);

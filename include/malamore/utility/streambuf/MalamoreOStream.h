@@ -47,6 +47,9 @@ public:
     BOOLEAN IsOpen() const { return m_IsOpen; }
 
     // Overload degli operatori fluidi esenti da STL
+    bool Sputn(const char* s, size_t count) {
+        return m_StreamBuf.Sputn(s, count);
+    }
     MalamoreOStream& operator<<(const char* str);
     MalamoreOStream& operator<<(const WCHAR* wstr);
     MalamoreOStream& operator<<(char c);

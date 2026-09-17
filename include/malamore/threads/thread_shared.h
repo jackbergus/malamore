@@ -5,6 +5,7 @@
 #ifndef MALAMORE_THREAD_SHARED_H
 #define MALAMORE_THREAD_SHARED_H
 
+
 #ifdef LINK_KERNEL
 #include <ntddk.h>
 #else
@@ -47,6 +48,20 @@ typedef void (*PFN_EXECUTE_ROUTINE_IO)(
     PVOID ThreadContext // <--- CORRETTO E TIPIZZATO!
 );
 
+#define FUTURE_BUFFER_SIZE 512
+
+#pragma pack(push, 4)
+struct FutureResultParcel {
+    UCHAR DataBuffer[FUTURE_BUFFER_SIZE]; // <--- REQUISITO: Buffer statico nativo di sosta
+    ULONG DataLength;                     // Dimensione reale espressa in byte dei dati validi
+};
+#pragma pack(pop)
+
+struct UnifiedThreadContext;
+
+// Firma aggiornata della routine computazionale Real-Time del tandem o dell'I/O
+typedef void (*PFN_FUTURE_THREAD_ROUTINE)(struct UnifiedThreadContext* Context, struct FutureResultParcel* OutResult);
+
 #pragma pack(push, 4)
 // La struttura del contesto unificato in microsecondi
 struct UnifiedThreadContext {
@@ -62,7 +77,7 @@ struct UnifiedThreadContext {
     volatile LONG KeepRunning;
     KAFFINITY AffinityMask;
 
-    PFN_EXECUTE_ROUTINE_IO TaskFunctionPointer; // Puntatore allineato alla nuova firma
+    PFN_FUTURE_THREAD_ROUTINE TaskFunctionPointer; // Puntatore allineato alla nuova firma
 
     WCHAR DevicePath[MAX_PATH];
     ULONG TargetThreadId;
@@ -75,18 +90,7 @@ struct UnifiedThreadContext {
     // UCHAR ScratchBuffer[2048];
 };
 
-// Lo Slot Omogeneo dell'array unico del pool statico
-struct MalamoreThreadSlot {
-    ULONG SlotId;
-    enum MalamoreThreadType Type;
-    KAFFINITY BaseAffinityMask;
 
-    HANDLE hThreadHandleA;
-    HANDLE hThreadHandleB;
-
-    struct UnifiedThreadContext ContextA; // Gestisce HW Reader o Task A del tandem
-    struct UnifiedThreadContext ContextB; // Gestisce esclusivamente il Task B del tandem
-};
 #pragma pack(pop)
 
 

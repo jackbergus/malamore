@@ -7,8 +7,32 @@
 
 #define MAX_POOL_CORES          (MAX_TOTAL_SLOTS)
 
-#include <malamore/threads/thread_shared.h>
+#include <malamore/threads/ThreadGuard.h>
 #include "malamore/structures/InterProcessChannelData.h"
+
+struct MalamoreThreadSlot {
+    ULONG SlotId;
+    enum MalamoreThreadType Type;
+    KAFFINITY BaseAffinityMask;
+    UnifiedThreadInterface threadArgument;
+    ThreadGuard            actualThread;
+};
+
+// Lo Slot Omogeneo dell'array unico del pool statico
+struct MalamoreTaskSlot {
+    MalamoreThreadSlot* ContextAB[2];
+    InterProcessChannelData IpcChannel;
+    // // HANDLE hThreadHandleA;
+    // // HANDLE hThreadHandleB;
+    //
+    // struct UnifiedThreadContext* ContextA; // Gestisce HW Reader o Task A del tandem
+    // struct UnifiedThreadContext* ContextB; // Gestisce esclusivamente il Task B del tandem
+    //
+    // ThreadGuard* hThreadHandleA;
+    // ThreadGuard* hThreadHandleB;
+};
+
+
 
 // =========================================================================
 // CORE POOL REGISTRY CENTRALIZZATA (ARRAY UNICO OMOGENEO STATICO)
@@ -16,7 +40,8 @@
 #pragma pack(push, 4)
 struct CorePoolRegistry {
     struct MalamoreThreadSlot ThreadPool[MAX_TOTAL_SLOTS];
-    InterProcessChannelData IpcChannels[MAX_GENERIC_TASKS];
+    struct MalamoreTaskSlot   Tasks[MAX_TOTAL_SLOTS];
+    // InterProcessChannelData IpcChannels[MAX_GENERIC_TASKS];
 
     ULONG CurrentHwThreadsCount;
     ULONG CurrentGenericTasksCount;
@@ -31,7 +56,7 @@ struct CorePoolRegistry {
     HANDLE                  hDiskThread;
     volatile LONG           TerminateDiskThread;
     InterProcessChannelData TelemetryChannel;
-    MalamoreThreadSlot      TelemetryThread;
+    // MalamoreThreadSlot      TelemetryThread;
 };
 #pragma pack(pop)
 
@@ -47,12 +72,14 @@ extern "C" {
     VOID CorePool_ShutdownAndClear();
 #endif
 
+    NTSTATUS CorePool_StartPoolExecution();
     NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse);
     BOOL isTelemetryQueueEmpty();
+    VOID dumpBinaryTelemetryToFile();
     ULONG64 usecToTicks(const ULONG64 usec);
     NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet);
     NTSTATUS CorePool_RouteMessageSrcToDest(LONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength);
-
+    NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId);
 #ifdef __cplusplus
 }
 #endif
