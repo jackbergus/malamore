@@ -33,7 +33,6 @@ VOID TelemetrySink(struct UnifiedThreadContext *Context, struct FutureResultParc
             KeDelayExecutionThread(KernelMode, FALSE, &interval);
             continue;
         }
-
         dumpBinaryTelemetryToFile();
         if (&nextPeriodOfTime)
             ((LARGE_INTEGER *) &nextPeriodOfTime)->QuadPart += ((ULONG64) periodTicks);

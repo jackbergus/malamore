@@ -29,9 +29,10 @@ extern "C" BOOL isTelemetryQueueEmpty() {
 
 extern "C" VOID dumpBinaryTelemetryToFile() {
     const struct DataChannelParcel* msg = RealTimeIPC_Top(&g_PoolRegistry.TelemetryChannel);
-    if (msg) {
+    while (msg) {
         telemetryFile.Sputn(reinterpret_cast<const char *>(msg), sizeof(*msg));
         RealTimeIPC_Pop(&g_PoolRegistry.TelemetryChannel);
+        msg = RealTimeIPC_Top(&g_PoolRegistry.TelemetryChannel);
     }
 }
 
@@ -128,9 +129,50 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     g_PoolRegistry.IsRegistryActive = TRUE; // TRUE
     g_PoolRegistry.TerminateDiskThread = 0;
 
+    /////////Now, registering the Telemetry Thread
+        if (g_PoolRegistry.IsRegistryActive == 0) {
+        KdPrint(("[CorePool_RegisterHwReader] Inactive registry, cannot continue with registering an HW reader \n"));
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
+    struct MalamoreThreadSlot* slot = nullptr;
+    struct MalamoreTaskSlot* task = nullptr;
+    for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
+        // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
+        if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
+            slot = &g_PoolRegistry.ThreadPool[i];
+            task = &g_PoolRegistry.Tasks[i];
+            break;
+        }
+    }
+
+    // Se l'array statico unificato pre-allocato è saturo, respinge la richiesta per proteggere il sistema
+    if ((!slot) || (!task)) {
+        KdPrint(("[CorePool_RegisterGenericTask] It seems that all threads in the pool are locked. I cannot do anything more. \n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    slot->Type = THREAD_TYPE_TELEMETRY_WRITER;
+    task->ContextAB[0] = slot;
+    auto* ctx = &slot->threadArgument.Context;
+    // struct UnifiedThreadContext* ctx = &slot->ContextA;
+    // slot->ProcessId = slot->SlotId;
+    ctx->PeriodUs = 5000;
+    ctx->MaxBudgetUs = 5000;
+    ctx->TargetThreadId = -1;
+    ctx->TaskFunctionPointer = TelemetrySink;
+    RtlZeroMemory(ctx->DevicePath, sizeof(ctx->DevicePath));
+    ctx->KeepRunning = 0;
+    ctx->PhaseOffsetTicks = 0;
+    g_PoolRegistry.CurrentHwThreadsCount++;
+    g_PoolRegistry.TotalAllocatedSlots++;
+    return STATUS_SUCCESS;
+
     // Ritorna il successo: l'infrastruttura statica è pronta a ricevere le registrazioni dei nodi
     return STATUS_SUCCESS;
 }
+
 
 extern "C"
 NTSTATUS CorePool_RegisterHwReader(
@@ -139,6 +181,7 @@ NTSTATUS CorePool_RegisterHwReader(
     ULONG samplingPeriodUs,
     ULONG targetTaskId
 ) {
+
     if (g_PoolRegistry.IsRegistryActive == 0) {
         KdPrint(("[CorePool_RegisterHwReader] Inactive registry, cannot continue with registering an HW reader \n"));
         return STATUS_INVALID_DEVICE_STATE;
@@ -163,7 +206,6 @@ NTSTATUS CorePool_RegisterHwReader(
     }
 
     slot->Type = THREAD_TYPE_HW_READER;
-    slot->BaseAffinityMask = slot->BaseAffinityMask;
     task->ContextAB[0] = slot;
     auto* ctx = &slot->threadArgument.Context;
     // struct UnifiedThreadContext* ctx = &slot->ContextA;
