@@ -98,14 +98,9 @@ int main() {
                 }
                 ReconstructFromSubsequentTickKernel(&telemetry, val, buffer, sizeof(buffer));
                 std::cout << "[" << buffer << "] srcID = " << parcel.SourceNodeId;
-
-                if (IsBufferPrintable(parcel.PayloadData, parcel.DataLength)) {
-                    std::cout << " msg = '" << parcel.PayloadData << "'" << std::endl;
-                } else {
-                    std::cout << " msg (hexdump): " << std::endl << std::endl;
-                    hex_dump(std::cout, parcel.PayloadData, parcel.DataLength, true);
-                    std::cout << std::endl << std::endl;
-                }
+                std::cout << " msg (hexdump): " << std::endl << "'''" << std::endl;
+                hex_dump(std::cout, parcel.PayloadData, parcel.DataLength, true);
+                std::cout << "'''" << std::endl << std::endl;
             }
 
             fclose(fptr);
