@@ -832,6 +832,87 @@ inline NTSTATUS ZwFlushBuffersFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusB
     }
 }
 
+    // =========================================================================
+    // ESTENSIONI LAYER UTENTE: MAPPATURA STRUTTURE E ROUTINE TEMPORALI (RING 3)
+    // =========================================================================
+
+    // 1. Definizione della struttura TIME_FIELDS speculare al WDK di Ring 0
+    typedef struct _TIME_FIELDS {
+        CSHORT Year;          // Intervallo: [1601...]
+        CSHORT Month;         // Intervallo: [1...12]
+        CSHORT Day;           // Intervallo: [1...31]
+        CSHORT Hour;          // Intervallo: [0...23]
+        CSHORT Minute;        // Intervallo: [0...59]
+        CSHORT Second;        // Intervallo: [0...59]
+        CSHORT Milliseconds;  // Intervallo: [0...999]
+        CSHORT Weekday;       // Intervallo: [0...6] (0 = Domenica)
+    } TIME_FIELDS, *PTIME_FIELDS;
+
+    /**
+     * Mappatura unificata di RtlTimeToTimeFields per lo spazio utente (Ring 3).
+     * Scompone il tempo a 64 bit del kernel (100ns da epoca 1601) in record orari discreti.
+     */
+    inline VOID RtlTimeToTimeFields(
+        PLARGE_INTEGER Time,
+        PTIME_FIELDS TimeFields
+    ) {
+        if (Time == NULL || TimeFields == NULL) return;
+
+        FILETIME fileTime;
+        // Estrarre i registri hardware a 64 bit della coordinata oraria
+        fileTime.dwLowDateTime = Time->LowPart;
+        fileTime.dwHighDateTime = static_cast<DWORD>(Time->HighPart);
+
+        SYSTEMTIME systemTime;
+        // La system call Win32 converte l'epoca 1601 NT nativa in record in RAM
+        if (FileTimeToSystemTime(&fileTime, &systemTime)) {
+            TimeFields->Year         = static_cast<CSHORT>(systemTime.wYear);
+            TimeFields->Month        = static_cast<CSHORT>(systemTime.wMonth);
+            TimeFields->Day          = static_cast<CSHORT>(systemTime.wDay);
+            TimeFields->Hour         = static_cast<CSHORT>(systemTime.wHour);
+            TimeFields->Minute       = static_cast<CSHORT>(systemTime.wMinute);
+            TimeFields->Second       = static_cast<CSHORT>(systemTime.wSecond);
+            TimeFields->Milliseconds = static_cast<CSHORT>(systemTime.wMilliseconds);
+            TimeFields->Weekday      = static_cast<CSHORT>(systemTime.wDayOfWeek);
+        } else {
+            // Fallback di azzeramento di sicurezza se la coordinata è corrotta
+            RtlZeroMemory(TimeFields, sizeof(TIME_FIELDS));
+        }
+    }
+
+    /**
+     * Mappatura unificata di RtlStringCchPrintfA (Ansi) per lo spazio utente (Ring 3).
+     * Sfrutta l'orchestrazione sicura ad allocazione statica di strsafe.h
+     */
+    inline NTSTATUS RtlStringCchPrintfA(
+        NTSTRSAFE_PSTR pszDest,
+        size_t cchDest,
+        NTSTRSAFE_PCSTR pszFormat,
+        ...
+    ) {
+        if (pszDest == NULL || cchDest == 0 || pszFormat == NULL) {
+            return STATUS_INVALID_PARAMETER;
+        }
+
+        va_list args;
+        va_start(args, pszFormat);
+        
+        // Invocazione della variante Win32 sicura basata su argomenti variabili (va_list)
+        HRESULT hr = StringCchVPrintfA(pszDest, cchDest, pszFormat, args);
+        
+        va_end(args);
+
+        // Mappatura geometrica del risultato per conformità NTSTATUS
+        if (SUCCEEDED(hr)) {
+            return STATUS_SUCCESS;
+        } else if (hr == STRSAFE_E_INSUFFICIENT_BUFFER) {
+            return STATUS_BUFFER_OVERFLOW;
+        }
+        
+        return STATUS_UNSUCCESSFUL;
+    }
+
+
 // Abilitiamo il comando di annullamento dell'I/O asincrono per lo spazio utente
 #define ZwCancelIoFile(FileHandle, IoStatusBlock) \
 (CancelIoEx((FileHandle), NULL) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL)
