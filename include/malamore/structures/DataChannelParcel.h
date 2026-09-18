@@ -7,7 +7,7 @@
 
 #ifndef  DataChannelParcelArraySize
 #define     DataChannelParcelArraySize      (1024)
-#include "malamore/utility/kernel_compatibility.h"
+#include <malamore/utility/kernel_compatibility.h>
 #endif
 
 

@@ -2,7 +2,7 @@
 // Created by Giacomo Bergami on 15/09/2026.
 //
 
-#include <ntstrsafe.h>
+// #include <ntstrsafe.h>
 #include <malamore/utility/telemetry_formatter.h>
 
 /**
@@ -27,33 +27,6 @@ BOOLEAN IsBufferPrintable(const UCHAR* buffer, ULONG length) {
  * Converte il timestamp hardware a 64-bit nel formato stringa ISO richiesto:
  * YYYY-MM-DD HH:MM:SS.NNNNNNNNN
  */
-NTSTATUS FormatKernelTimestamp(ULONG64 kernelTimestamp, char* outBuffer, ULONG maxCch) {
-    LARGE_INTEGER systemTime;
-    LARGE_INTEGER localTime;
-    TIME_FIELDS timeFields;
-
-    // 1. Il timestamp passato viene convertito in LARGE_INTEGER per l'Object Manager
-    systemTime.QuadPart = static_cast<LONGLONG>(kernelTimestamp);
-
-    // 2. Conversione del tempo di sistema nel tempo locale della macchina virtuale
-    ExSystemTimeToLocalTime(&systemTime, &localTime);
-
-    // 3. Decompressione del tempo locale nei campi di calendario (Anno, Mese, Giorno, ecc.)
-    RtlTimeToTimeFields(&localTime, &timeFields);
-
-    // 4. Calcolo dei nanosecondi residui estratti dalla frazione di secondo del timestamp
-    // Windows gestisce unità da 100 nanosecondi, quindi moltiplichiamo il resto per 100
-    ULONG nanoseconds = (systemTime.QuadPart % 10000000E64) * 100;
-
-    // 5. Formattazione sicura a Ring 0 tramite ntstrsafe
-    return RtlStringCchPrintfA(
-        outBuffer, maxCch,
-        "%04d-%02d-%02d %02d:%02d:%02d.%09lu",
-        timeFields.Year, timeFields.Month, timeFields.Day,
-        timeFields.Hour, timeFields.Minute, timeFields.Second,
-        nanoseconds
-    );
-}
 
 ULONGLONG UnifiedGetSystemBootTimeMs() {
     // --- RING 0 (KERNEL MODE) ---
@@ -152,4 +125,32 @@ BOOLEAN fillInSnapshot(struct QpcSnapshot *datum) {
     datum->qpcFrequency = frequency;
     return TRUE;
 }
+
+// NTSTATUS FormatKernelTimestamp(ULONG64 kernelTimestamp, char* outBuffer, ULONG maxCch) {
+//     LARGE_INTEGER systemTime;
+//     LARGE_INTEGER localTime;
+//     TIME_FIELDS timeFields;
+//
+//     // 1. Il timestamp passato viene convertito in LARGE_INTEGER per l'Object Manager
+//     systemTime.QuadPart = static_cast<LONGLONG>(kernelTimestamp);
+//
+//     // 2. Conversione del tempo di sistema nel tempo locale della macchina virtuale
+//     ExSystemTimeToLocalTime(&systemTime, &localTime);
+//
+//     // 3. Decompressione del tempo locale nei campi di calendario (Anno, Mese, Giorno, ecc.)
+//     RtlTimeToTimeFields(&localTime, &timeFields);
+//
+//     // 4. Calcolo dei nanosecondi residui estratti dalla frazione di secondo del timestamp
+//     // Windows gestisce unità da 100 nanosecondi, quindi moltiplichiamo il resto per 100
+//     ULONG nanoseconds = (systemTime.QuadPart % 10000000E64) * 100;
+//
+//     // 5. Formattazione sicura a Ring 0 tramite ntstrsafe
+//     return RtlStringCchPrintfA(
+//         outBuffer, maxCch,
+//         "%04d-%02d-%02d %02d:%02d:%02d.%09lu",
+//         timeFields.Year, timeFields.Month, timeFields.Day,
+//         timeFields.Hour, timeFields.Minute, timeFields.Second,
+//         nanoseconds
+//     );
+// }
 

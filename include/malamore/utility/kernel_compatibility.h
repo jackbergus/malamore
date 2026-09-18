@@ -151,8 +151,12 @@
 #define ASYNC_READ_TAG 0x4153594E
 #endif
 
+#ifndef FILE_APPEND_DATA
 #define FILE_APPEND_DATA              0x00000004
+#endif
+#ifndef FILE_WRITE_DATA
 #define FILE_WRITE_DATA               0x00000002
+#endif
 
 #ifndef FILE_SUPERSEDE
 #define FILE_SUPERSEDE            0x00000000 // Valore reale nel WDK
@@ -926,24 +930,68 @@ inline NTSTATUS ZwFlushBuffersFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusB
 
 // 1. Emulazione di KeQuerySystemTimePrecise per Ring 3
 // Restituisce il tempo UTC corrente in intervalli da 100 nanosecondi dal 1° gennaio 1601.
-inline VOID KeQuerySystemTimePrecise(PLARGE_INTEGER CurrentTime) {
-        if (!CurrentTime) return;
-        FILETIME ft;
-        GetSystemTimePreciseAsFileTime(&ft);
-
-        CurrentTime->LowPart = ft.dwLowDateTime;
-        CurrentTime->HighPart = ft.dwHighDateTime;
-    }
-
+// inline VOID KeQuerySystemTimePrecise(PLARGE_INTEGER CurrentTime) {
+//         if (!CurrentTime) return;
+//         FILETIME ft;
+//         GetSystemTimePreciseAsFileTime(&ft);
+//
+//         CurrentTime->LowPart = ft.dwLowDateTime;
+//         CurrentTime->HighPart = ft.dwHighDateTime;
+//     }
+// Istruiamo il linker a cercare il simbolo nelle librerie OneCore / MinCore di Windows.
+// Questo risolve l'errore LNK2019 / simbolo non risolto senza fare GetProcAddress.
+#pragma comment(lib, "OneCore.lib")
 // 2. Emulazione di KeQueryInterruptTime per Ring 3
 // Restituisce il tempo trascorso dal boot (inclusi i periodi di sleep/sospensione se stabili)
 // espresso in unità da 100 nanosecondi. Mappato sulla Win32 QueryInterruptTime.
+// Emulazione nativa di KeQueryInterruptTime in Ring 3 senza indirizzi fissi
 inline ULONG64 KeQueryInterruptTime() {
-        ULONGLONG interruptTimeNs100 = 0;
-        // QueryInterruptTime restituisce il tempo in unità da 100 nanosecondi
-        QueryInterruptTime(&interruptTimeNs100);
-        return interruptTimeNs100;
+    ULONGLONG interruptTimeNs100 = 0;
+
+    // QueryInterruptTimePrecise fornisce la massima accuratezza a livello hardware.
+    // È supportata nativamente a partire da Windows 10 in kernel32.dll.
+    QueryInterruptTimePrecise(&interruptTimeNs100);
+
+    return interruptTimeNs100;
+}
+
+// Emulazione di KeQuerySystemTimePrecise per Ring 3 tramite API standard
+inline VOID KeQuerySystemTimePrecise(PLARGE_INTEGER CurrentTime) {
+    if (!CurrentTime) return;
+
+    FILETIME ft;
+    // API ufficiale ad alta precisione disponibile da Windows 8 in poi
+    GetSystemTimePreciseAsFileTime(&ft);
+
+    ULARGE_INTEGER uli;
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    CurrentTime->QuadPart = uli.QuadPart;
+}
+
+// --- EMULAZIONE DI ExSystemTimeToLocalTime PER RING 3 ---
+inline VOID ExSystemTimeToLocalTime(
+    _In_  PLARGE_INTEGER SystemTime,
+    _Out_ PLARGE_INTEGER LocalTime
+) {
+    if (!SystemTime || !LocalTime) return;
+
+    // Mappiamo i LARGE_INTEGER sulle strutture FILETIME di Win32
+    FILETIME ftSystem;
+    ftSystem.dwLowDateTime = SystemTime->LowPart;
+    ftSystem.dwHighDateTime = SystemTime->HighPart;
+
+    FILETIME ftLocal;
+    // Effettua la conversione matematica sottraendo il fuso orario corrente
+    if (FileTimeToLocalFileTime(&ftSystem, &ftLocal)) {
+        LocalTime->LowPart = ftLocal.dwLowDateTime;
+        LocalTime->HighPart = ftLocal.dwHighDateTime;
+    } else {
+        // Fallback difensivo in caso di errore Win32: copia il tempo inalterato
+        LocalTime->QuadPart = SystemTime->QuadPart;
     }
+}
 
 #ifdef __cplusplus
 extern "C" {

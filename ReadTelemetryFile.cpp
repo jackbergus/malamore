@@ -63,7 +63,7 @@ std::ostream& hex_dump(std::ostream& os, const void *buffer,
 int main() {
     char buffer[8064];
     memset(buffer, 0, sizeof(buffer));
-    bool firstRecord;
+    bool firstRecord = true;
     QpcSnapshot telemetry;
     LARGE_INTEGER largeInt;
     std::filesystem::path file{"Malamore_Telemetry_Sink.txt"};
@@ -73,15 +73,14 @@ int main() {
         fptr = fopen("Malamore_Telemetry_Sink.txt", "rb");
         if(fptr == NULL) {
             printf("Unable to open the file\n");
-
-            exit(1);
+            return EXIT_FAILURE;
         }
         else {
             // Reading until the end of the file using fread
             size_t bytesRead;
             if (firstRecord) {
                 if (((bytesRead = fread(&parcel, sizeof(parcel), 1, fptr)) > 0)) {
-                    if ((parcel.Timestamp != 0) || (parcel.SourceNodeId != ULLONG_MAX) || (parcel.DataLength != sizeof(QpcSnapshot))) {
+                    if ((parcel.Timestamp != 0) || (parcel.SourceNodeId != ULONG_MAX) || (parcel.DataLength != sizeof(QpcSnapshot))) {
                         std::cerr << "Expecting that the first record is a telemetry record for converting the timestamp. But that is not the case" << std::endl;
                         return EXIT_FAILURE;
                     }

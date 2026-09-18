@@ -19,7 +19,7 @@ BOOLEAN IsBufferPrintable(const UCHAR* buffer, ULONG length);
  * YYYY-MM-DD HH:MM:SS.NNNNNNNNN
  */
 
-NTSTATUS FormatKernelTimestamp(ULONG64 kernelTimestamp, char* outBuffer, ULONG maxCch);
+// NTSTATUS FormatKernelTimestamp(ULONG64 kernelTimestamp, char* outBuffer, ULONG maxCch);
 
 // ==========================================
 // 1. GET SYSTEM BOOT TIME (Ring-Dependent)
