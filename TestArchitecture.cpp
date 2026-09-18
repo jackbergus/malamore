@@ -45,7 +45,7 @@ void main() {
     LARGE_INTEGER currentTime;
 
     auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(30);
+    auto end_time = start_time + std::chrono::seconds(60);
 
     long long iteration_count = 0;
 

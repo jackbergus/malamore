@@ -15,6 +15,9 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         return;
     }
 
+    SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+
     NTSTATUS status;
     ULONG bytesActuallyRead;
 
