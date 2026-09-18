@@ -93,7 +93,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         // RtlZeroMemory(idata, HARDWARE_PAYLOAD_SIZE);
         // CONFIGURAZIONE DEL TIMEOUT RIGIDO DEL KERNEL
         bytesActuallyRead = 0;
-        status = Context->DevicePath->ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
+\        status = Context->DevicePath->ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
 
         // unsigned long long messageId = 0;
         // sscanf analizza la stringa cercando di accoppiare esattamente il testo statico

@@ -23,6 +23,10 @@ public:
     MalamoreIStream();
     ~MalamoreIStream();
 
+    MalamoreIStream(const MalamoreIStream&) = delete;
+    MalamoreIStream(MalamoreIStream&&) = delete;
+    MalamoreIStream& operator=(const MalamoreIStream&) = delete;
+    MalamoreIStream& operator=(MalamoreIStream&&) = delete;
     NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
     BOOLEAN IsOpen() const { return original.IsOpen(); }

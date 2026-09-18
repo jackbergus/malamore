@@ -734,8 +734,10 @@ inline void KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State) {
         // Crea un evento Win32 manual-reset o auto-reset anonimo
         /*Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
 */
-
-        Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+        if (Event->Handle == NULL)
+        {
+            Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+        }
         RtlZeroMemory(&Event->Overlapped, sizeof(OVERLAPPED));
         Event->Overlapped.hEvent = Event->Handle; // Sincronizzazione automatica nativa
     }
