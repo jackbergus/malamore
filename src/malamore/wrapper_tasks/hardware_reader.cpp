@@ -42,15 +42,14 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     // =========================================================================
     // STEP 1: APERTURA DINAMICA (ACCETTA SIA DRIVERS CHE FILE NEL FILE SYSTEM)
     // =========================================================================
-    MalamoreIStream driver;
-    status = driver.Open(Context->DevicePath, StreamFlags::Read | StreamFlags::Write);
-
-    if (!NT_SUCCESS(status)) {
-        KdPrint(("[MALAMORE 🚨] Impossibile aprire la risorsa '%ws'. Errore: %s\n", Context->DevicePath, NtStatusToString(status)));
-        KeRevertToUserGroupAffinityThread(&previousAffinity);
-        PsTerminateSystemThread(status);
-        return;
-    }
+    // MalamoreIStream driver;
+    // status = driver.Open(Context->DevicePath, StreamFlags::Read | StreamFlags::Write);
+    // if (!NT_SUCCESS(status)) {
+    //     KdPrint(("[MALAMORE 🚨] Impossibile aprire la risorsa '%ws'. Errore: %s\n", Context->DevicePath, NtStatusToString(status)));
+    //     KeRevertToUserGroupAffinityThread(&previousAffinity);
+    //     PsTerminateSystemThread(status);
+    //     return;
+    // }
 
     // Allineamento temporale iniziale sulla barriera comune pre-calcolata
     INIT_SYNCH_FROM_CONTEXT(&nextPeriodTime, Context, periodTicks);  //nextPeriodTime.QuadPart = Context->SynchronizedStartTicks;
@@ -72,7 +71,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         // RtlZeroMemory(idata, HARDWARE_PAYLOAD_SIZE);
         // CONFIGURAZIONE DEL TIMEOUT RIGIDO DEL KERNEL
         bytesActuallyRead = 0;
-        status = driver.ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
+        status = Context->DevicePath->ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
 
         // unsigned long long messageId = 0;
         // sscanf analizza la stringa cercando di accoppiare esattamente il testo statico
@@ -105,6 +104,6 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
             ((LARGE_INTEGER *) &nextPeriodTime)->QuadPart += ((ULONG64) periodTicks);
     }
 
-    driver.Close();
+    // driver.Close();
     KeRevertToUserGroupAffinityThread(&previousAffinity);
 }
