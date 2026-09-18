@@ -54,3 +54,102 @@ NTSTATUS FormatKernelTimestamp(ULONG64 kernelTimestamp, char* outBuffer, ULONG m
         nanoseconds
     );
 }
+
+ULONGLONG UnifiedGetSystemBootTimeMs() {
+    // --- RING 0 (KERNEL MODE) ---
+    LARGE_INTEGER systemTime;
+    ULONGLONG interruptTime;
+
+    // Get exact system wall-clock (UTC) in 100-ns intervals since 1601
+    KeQuerySystemTimePrecise(&systemTime);
+
+    // Get system uptime in 100-ns intervals (ignores sleep states, matching QPC behavior)
+    interruptTime = KeQueryInterruptTime();
+
+    // Boot Time = Current System Time - Uptime
+    ULONGLONG bootTimeNs100 = systemTime.QuadPart - interruptTime;
+
+    // Convert Windows Epoch (1601) to Unix Epoch (1970)
+    // 116444736000000000 = 100-ns intervals between 1601 and 1970
+    ULONGLONG unixBootTimeNs100 = bootTimeNs100 - 116444736000000000ULL;
+
+    return unixBootTimeNs100 / 10000; // Convert 100-ns to milliseconds
+}
+
+
+NTSTATUS ReconstructFromSubsequentTickKernel(const QpcSnapshot* baseSnapshot, LONGLONG currentTick, char* outBuffer, size_t bufferSize) {
+    if (!baseSnapshot || !outBuffer || bufferSize == 0) return STATUS_INVALID_PARAMETER;
+
+    // 1. Calcola il delta dei tick rispetto allo snapshot iniziale
+    LONGLONG deltaTicks = currentTick - baseSnapshot->qpcTicks.QuadPart;
+    LONGLONG freq = baseSnapshot->qpcFrequency.QuadPart;
+
+    // 2. Calcola i secondi interi e il resto dei tick
+    LONGLONG deltaSeconds = deltaTicks / freq;
+    LONGLONG remainderTicks = deltaTicks % freq;
+
+    // 3. Converti il resto dei tick in nanosecondi usando aritmetica intera
+    // Moltiplichiamo prima per 1.000.000.000 per mantenere la massima precisione
+    LONGLONG deltaNanosecondsFraction = (remainderTicks * 1000000000LL) / freq;
+
+    // 4. Calcola il tempo dello snapshot iniziale (Boot Time + Tick Iniziale)
+    LONGLONG baseTicks = baseSnapshot->qpcTicks.QuadPart;
+    LONGLONG baseSeconds = baseTicks / freq;
+    LONGLONG baseRemainderTicks = baseTicks % freq;
+    LONGLONG baseNanosecondsFraction = (baseRemainderTicks * 1000000000LL) / freq;
+
+    // 5. Somma i tempi (Tempo Base + Delta Corrente)
+    LONGLONG totalSecondsSinceEpoch = (baseSnapshot->bootTimeMsSinceEpoch / 1000) + baseSeconds + deltaSeconds;
+    LONGLONG totalNanosecondsFraction = (baseSnapshot->bootTimeMsSinceEpoch % 1000 * 1000000) + baseNanosecondsFraction + deltaNanosecondsFraction;
+
+    // Gestione dell'overflow dei nanosecondi nei secondi interi
+    if (totalNanosecondsFraction >= 1000000000LL) {
+        totalSecondsSinceEpoch += (totalNanosecondsFraction / 1000000000LL);
+        totalNanosecondsFraction = totalNanosecondsFraction % 1000000000LL;
+    }
+
+    // 6. Converti il tempo totale in formato FILETIME di Windows (intervalli da 100-ns dal 1601)
+    // 116444736000000000ULL è la costante Unix Epoch -> Windows Epoch
+    LONGLONG windowsNs100 = (totalSecondsSinceEpoch * 10000000LL) + (totalNanosecondsFraction / 100) + 116444736000000000ULL;
+
+    LARGE_INTEGER rawTime;
+    rawTime.QuadPart = windowsNs100;
+
+    // 7. Scomponi il tempo nelle strutture Year/Month/Day Hour:Minute:Second
+    TIME_FIELDS tf;
+    RtlTimeToTimeFields(&rawTime, &tf);
+
+    // I nanosecondi finali da stampare sono la frazione calcolata originariamente (fino a 9 cifre)
+    // Ripristiniamo la precisione esatta sotto i 100ns usando l'ultimo resto
+    LONGLONG exactNanoseconds = (totalNanosecondsFraction / 100) * 100 + (totalNanosecondsFraction % 100);
+
+    // 8. Scrittura sicura nel buffer stringa (Ring 0)
+    return RtlStringCchPrintfA(outBuffer, bufferSize,
+        "%04d/%02d/%02d %02d:%02d:%02d.%09lld",
+        tf.Year, tf.Month, tf.Day, tf.Hour, tf.Minute, tf.Second, exactNanoseconds);
+}
+
+BOOLEAN fillInSnapshot(struct QpcSnapshot *datum) {
+    if (!datum) {
+        return FALSE;
+    }
+
+    // --- PART 1: Collect Data ---
+    // Capture boot time before/during collection
+    ULONGLONG bootTimeMs = UnifiedGetSystemBootTimeMs();
+
+    // Query the frequency (constant per boot, but good to store)
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+
+    // Capture the target ticks (e.g., your event profile tick)
+    LARGE_INTEGER targetTicks;
+    QueryPerformanceCounter(&targetTicks);
+
+    // Simulate saving this data to a file/database and loading it back later
+    datum->bootTimeMsSinceEpoch = bootTimeMs;
+    datum->qpcTicks = targetTicks;
+    datum->qpcFrequency = frequency;
+    return TRUE;
+}
+

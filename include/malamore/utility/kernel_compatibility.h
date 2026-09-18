@@ -22,6 +22,7 @@
     #include <ntddk.h>
     #include <ntstrsafe.h>
 
+
     // Per completezza a Ring 0, alcune macro sono già fornite dal WDK
     #ifndef UNREFERENCED_PARAMETER
         #define UNREFERENCED_PARAMETER(P) (void)(P)
@@ -835,7 +836,9 @@ inline NTSTATUS ZwFlushBuffersFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusB
     // =========================================================================
     // ESTENSIONI LAYER UTENTE: MAPPATURA STRUTTURE E ROUTINE TEMPORALI (RING 3)
     // =========================================================================
-
+    // --- PORTING DI CSHORT IN USER MODE ---
+    typedef short CSHORT;
+    typedef short *PCSHORT;
     // 1. Definizione della struttura TIME_FIELDS speculare al WDK di Ring 0
     typedef struct _TIME_FIELDS {
         CSHORT Year;          // Intervallo: [1601...]
@@ -879,43 +882,68 @@ inline NTSTATUS ZwFlushBuffersFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusB
             RtlZeroMemory(TimeFields, sizeof(TIME_FIELDS));
         }
     }
-
+    // NTSTRSAFE_PSTR è un puntatore a una stringa ANSI (char*)
+    typedef PSTR  NTSTRSAFE_PSTR;
+    typedef PCSTR NTSTRSAFE_PCSTR; // Versione const (se ti dovesse servire)
     /**
      * Mappatura unificata di RtlStringCchPrintfA (Ansi) per lo spazio utente (Ring 3).
      * Sfrutta l'orchestrazione sicura ad allocazione statica di strsafe.h
      */
-    inline NTSTATUS RtlStringCchPrintfA(
-        NTSTRSAFE_PSTR pszDest,
-        size_t cchDest,
-        NTSTRSAFE_PCSTR pszFormat,
-        ...
-    ) {
-        if (pszDest == NULL || cchDest == 0 || pszFormat == NULL) {
-            return STATUS_INVALID_PARAMETER;
-        }
-
-        va_list args;
-        va_start(args, pszFormat);
-        
-        // Invocazione della variante Win32 sicura basata su argomenti variabili (va_list)
-        HRESULT hr = StringCchVPrintfA(pszDest, cchDest, pszFormat, args);
-        
-        va_end(args);
-
-        // Mappatura geometrica del risultato per conformità NTSTATUS
-        if (SUCCEEDED(hr)) {
-            return STATUS_SUCCESS;
-        } else if (hr == STRSAFE_E_INSUFFICIENT_BUFFER) {
-            return STATUS_BUFFER_OVERFLOW;
-        }
-        
-        return STATUS_UNSUCCESSFUL;
-    }
+    // inline NTSTATUS RtlStringCchPrintfA(
+    //     NTSTRSAFE_PSTR pszDest,
+    //     size_t cchDest,
+    //     NTSTRSAFE_PCSTR pszFormat,
+    //     ...
+    // ) {
+    //     if (pszDest == NULL || cchDest == 0 || pszFormat == NULL) {
+    //         return STATUS_INVALID_PARAMETER;
+    //     }
+    //
+    //     va_list args;
+    //     va_start(args, pszFormat);
+    //
+    //     // Invocazione della variante Win32 sicura basata su argomenti variabili (va_list)
+    //     HRESULT hr = StringCchVPrintfA(pszDest, cchDest, pszFormat, args);
+    //
+    //     va_end(args);
+    //
+    //     // Mappatura geometrica del risultato per conformità NTSTATUS
+    //     if (SUCCEEDED(hr)) {
+    //         return STATUS_SUCCESS;
+    //     } else if (hr == STRSAFE_E_INSUFFICIENT_BUFFER) {
+    //         return STATUS_BUFFER_OVERFLOW;
+    //     }
+    //
+    //     return STATUS_UNSUCCESSFUL;
+    // }
 
 
 // Abilitiamo il comando di annullamento dell'I/O asincrono per lo spazio utente
 #define ZwCancelIoFile(FileHandle, IoStatusBlock) \
 (CancelIoEx((FileHandle), NULL) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL)
+
+#include <string>
+
+// 1. Emulazione di KeQuerySystemTimePrecise per Ring 3
+// Restituisce il tempo UTC corrente in intervalli da 100 nanosecondi dal 1° gennaio 1601.
+inline VOID KeQuerySystemTimePrecise(PLARGE_INTEGER CurrentTime) {
+        if (!CurrentTime) return;
+        FILETIME ft;
+        GetSystemTimePreciseAsFileTime(&ft);
+
+        CurrentTime->LowPart = ft.dwLowDateTime;
+        CurrentTime->HighPart = ft.dwHighDateTime;
+    }
+
+// 2. Emulazione di KeQueryInterruptTime per Ring 3
+// Restituisce il tempo trascorso dal boot (inclusi i periodi di sleep/sospensione se stabili)
+// espresso in unità da 100 nanosecondi. Mappato sulla Win32 QueryInterruptTime.
+inline ULONG64 KeQueryInterruptTime() {
+        ULONGLONG interruptTimeNs100 = 0;
+        // QueryInterruptTime restituisce il tempo in unità da 100 nanosecondi
+        QueryInterruptTime(&interruptTimeNs100);
+        return interruptTimeNs100;
+    }
 
 #ifdef __cplusplus
 extern "C" {

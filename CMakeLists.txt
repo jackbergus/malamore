@@ -208,6 +208,7 @@ add_library(user_level_struct_library OBJECT
         src/malamore/wrapper_tasks/telemetry_writer.cpp
         src/malamore/winapi_client/Win32NamedPipeGuard.cpp
         src/malamore/utility/streambuf/MalamoreIOStream.cpp
+        src/malamore/utility/telemetry_formatter.cpp
 )
 
 add_executable(writing_thread_test tests/writing_thread_test.cpp)
@@ -220,20 +221,8 @@ add_executable(test_read_driver TestReadDriver.cpp)
 target_link_libraries(test_read_driver user_level_struct_library)
 
 add_executable(test_architecture tests/test_architecture.cpp
-        src/malamore/structures/InterProcessChannelData.cpp
-        src/malamore/structures/MessageMap.cpp
-        src/malamore/structures/TelemetryQueue.cpp
-        src/malamore/threads/ThreadGuard.cpp
-        src/malamore/utility/Path.cpp
-        src/malamore/utility/streambuf/KernelStreamBuf.cpp
-        src/malamore/utility/streambuf/MalamoreIStream.cpp
-        src/malamore/utility/streambuf/MalamoreOStream.cpp
-        src/malamore/threads/thread_pool.cpp
-        src/malamore/wrapper_tasks/hardware_reader.cpp
-        src/malamore/wrapper_tasks/telemetry_writer.cpp
-        src/malamore/winapi_client/Win32NamedPipeGuard.cpp
-        src/malamore/utility/streambuf/MalamoreIOStream.cpp
+
 )
-target_link_libraries(test_architecture Catch2WithMain )
+target_link_libraries(test_architecture Catch2WithMain user_level_struct_library)
 
 add_executable(read_telemetry_file ReadTelemetryFile.cpp)

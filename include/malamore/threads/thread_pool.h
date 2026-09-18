@@ -9,6 +9,7 @@
 
 #include <malamore/threads/ThreadGuard.h>
 #include "malamore/structures/InterProcessChannelData.h"
+#include "malamore/utility/telemetry_formatter.h"
 
 struct MalamoreThreadSlot {
     ULONG SlotId;
@@ -56,6 +57,7 @@ struct CorePoolRegistry {
     HANDLE                  hDiskThread;
     volatile LONG           TerminateDiskThread;
     InterProcessChannelData TelemetryChannel;
+    QpcSnapshot             snapshot;
     // MalamoreThreadSlot      TelemetryThread;
 };
 #pragma pack(pop)
@@ -69,17 +71,24 @@ extern "C" {
     NTSTATUS CorePool_RegisterHwReader(ULONG64 processId, const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, KAFFINITY coreAffinityMask, ULONG targetTaskId);
     NTSTATUS CorePool_RegisterGenericTask(ULONG64 processId, const char* taskName, ULONG executionPeriodUs, ULONG estimatedWcetUs, KAFFINITY coreAffinityMask, ULONG targetNodeId, BOOLEAN runRead, BOOLEAN runWrite, BOOLEAN saveDisk, PFN_EXECUTE_ROUTINE_IO executionFunction);
     NTSTATUS CorePool_StartPoolExecution();
-    VOID CorePool_ShutdownAndClear();
+
 #endif
 
-    NTSTATUS CorePool_StartPoolExecution();
     NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse);
+    NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId);
+    NTSTATUS CorePool_StartPoolExecution();
+    VOID CorePool_ShutdownAndClear();
+
+    /*
+     * The others are just utility methods that are used
+     *
+     */
     BOOL isTelemetryQueueEmpty();
     VOID dumpBinaryTelemetryToFile();
     ULONG64 usecToTicks(const ULONG64 usec);
     NTSTATUS CorePool_RouteMessageToDest(ULONG targetNodeId, const struct DataChannelParcel* packet);
     NTSTATUS CorePool_RouteMessageSrcToDest(ULONGLONG Timestamp, ULONG SourceNodeId, ULONG targetNodeId,  const UCHAR* PayloadData ,ULONG DataLength);
-    NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId);
+
 #ifdef __cplusplus
 }
 #endif

@@ -16,12 +16,12 @@
 static CorePoolRegistry g_PoolRegistry;
 static MalamorePath     telemetryFilePath{L"Malamore_Telemetry_Sink.txt"};
 static MalamoreOStream  telemetryFile;
-static LARGE_INTEGER freq;
-static LARGE_INTEGER currentTicks;
+// static LARGE_INTEGER freq;
+// static LARGE_INTEGER currentTicks;
 
 
 extern "C" ULONG64 usecToTicks(const ULONG64 usec) {
-    return (static_cast<ULONG64>(usec) * freq.QuadPart) / 1000000ULL;
+    return (static_cast<ULONG64>(usec) * g_PoolRegistry.snapshot.qpcFrequency.QuadPart) / 1000000ULL;
 }
 
 extern "C" BOOL isTelemetryQueueEmpty() {
@@ -90,11 +90,9 @@ void clear_task_and_thread(struct MalamoreThreadSlot &thread) {
 extern "C"
 NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     NTSTATUS status;
-    // Cattura istantanea della costante di frequenza hardware della macchina
-    currentTicks = KeQueryPerformanceCounter(&freq);
-
     // Sostituito RtlZeroMemory al posto di macro non standard
     RtlZeroMemory(&g_PoolRegistry, sizeof(CorePoolRegistry));
+    fillInSnapshot(&g_PoolRegistry.snapshot);
 
     ULONG activeProcessors = KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
     if (activeProcessors < 3) {
@@ -113,7 +111,7 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
         thread.Type = MalamoreThreadType::THREAD_TYPE_FREE;
         thread.SlotId = i;
         thread.threadArgument.Context.AffinityMask = mask;
-        thread.threadArgument.Context.PerfCounterFrequency = freq.QuadPart;
+        thread.threadArgument.Context.PerfCounterFrequency = g_PoolRegistry.snapshot.qpcFrequency.QuadPart;
         thread.threadArgument.Context.TargetThreadId = i;
         clear_task_and_thread(thread);
         configured++;
@@ -124,6 +122,7 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
 
     status = telemetryFile.Open(telemetryFilePath, StreamFlags::Trunc | StreamFlags::Creat | StreamFlags::Write);
     RealTimeIPC_Init(&g_PoolRegistry.TelemetryChannel);
+    RealTimeIPC_Push(&g_PoolRegistry.TelemetryChannel, 0, ULLONG_MAX, reinterpret_cast<const UCHAR *>(&g_PoolRegistry.snapshot), sizeof(g_PoolRegistry.snapshot));
 
     // Configurazione dei contatori iniziali di controllo per la flotta omogenea
     g_PoolRegistry.CurrentGenericTasksCount = 0;
@@ -170,7 +169,6 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     ctx->PhaseOffsetTicks = 0;
     g_PoolRegistry.CurrentHwThreadsCount++;
     g_PoolRegistry.TotalAllocatedSlots++;
-    return STATUS_SUCCESS;
 
     // Ritorna il successo: l'infrastruttura statica è pronta a ricevere le registrazioni dei nodi
     return STATUS_SUCCESS;
@@ -294,6 +292,20 @@ NTSTATUS CorePool_StartPoolExecution() {
         }
     }
     return status;
+}
+
+
+VOID CorePool_ShutdownAndClear() {
+    g_PoolRegistry.IsRegistryActive = 0;
+    for (ULONG i = 0; i < g_PoolRegistry.TotalAllocatedSlots; ++i) {
+        // No need to release the memory associated with the IPC communication queue, as everything is
+        // statically allocated. Just send the signal to stop the threads.
+        auto* slot = &g_PoolRegistry.ThreadPool[i];
+        slot->actualThread.Stop();
+    }
+    g_PoolRegistry.TotalAllocatedSlots = 0;
+    g_PoolRegistry.CurrentHwThreadsCount = 0;
+    g_PoolRegistry.CurrentGenericTasksCount = 0;
 }
 
 #if INCLUDE_UNTESTED_FEATURES
@@ -631,33 +643,5 @@ VOID DiskWriterThreadRoutine(_In_ PVOID Context) {
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
-VOID CorePool_ShutdownAndClear() {
-    g_PoolRegistry.IsRegistryActive = 0;
 
-    for (ULONG i = 0; i < g_PoolRegistry.TotalAllocatedSlots; ++i) {
-        struct MalamoreTaskSlot* slot = &g_PoolRegistry.ThreadPool[i];
-
-        InterlockedExchange(&slot->ContextA.KeepRunning, 0);
-        InterlockedExchange(&slot->ContextB.KeepRunning, 0);
-
-        if (slot->hThreadHandleA) {
-            PVOID obj;
-            if (NT_SUCCESS(ObReferenceObjectByHandle(slot->hThreadHandleA, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &obj, NULL))) {
-                KeWaitForSingleObject(obj, Executive, KernelMode, FALSE, NULL); ObDereferenceObject(obj);
-            }
-            ZwClose(slot->hThreadHandleA); slot->hThreadHandleA = NULL;
-        }
-        if (slot->hThreadHandleB) {
-            PVOID obj;
-            if (NT_SUCCESS(ObReferenceObjectByHandle(slot->hThreadHandleB, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &obj, NULL))) {
-                KeWaitForSingleObject(obj, Executive, KernelMode, FALSE, NULL); ObDereferenceObject(obj);
-            }
-            ZwClose(slot->hThreadHandleB); slot->hThreadHandleB = NULL;
-        }
-        slot->Type = THREAD_TYPE_FREE;
-    }
-    g_PoolRegistry.TotalAllocatedSlots = 0;
-    g_PoolRegistry.CurrentHwThreadsCount = 0;
-    g_PoolRegistry.CurrentGenericTasksCount = 0;
-}
 #endif
