@@ -4,6 +4,7 @@
 
 #ifndef MALAMORE_THREAD_SHARED_H
 #define MALAMORE_THREAD_SHARED_H
+#include "malamore/utility/streambuf/MalamoreIStream.h"
 
 
 #ifdef LINK_KERNEL
@@ -79,7 +80,8 @@ struct UnifiedThreadContext {
 
     PFN_FUTURE_THREAD_ROUTINE TaskFunctionPointer; // Puntatore allineato alla nuova firma
 
-    WCHAR DevicePath[MAX_PATH];
+    MalamoreIStream* DevicePath{nullptr};
+    // WCHAR DevicePath[MAX_PATH];
     ULONG TargetThreadId;
 
     // Flag operativi nativi per il controllo del flusso del core

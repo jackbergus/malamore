@@ -17,6 +17,10 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
 
     SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    // PROCESSOR_NUMBER idealProcessor;
+    // RtlZeroMemory(&idealProcessor, sizeof(PROCESSOR_NUMBER));
+    // idealProcessor.Number = 1; // Assegnazione rigida del core fisico
+    // SetThreadIdealProcessorEx(GetCurrentThread(), &idealProcessor, NULL);
 
     NTSTATUS status;
     ULONG bytesActuallyRead;

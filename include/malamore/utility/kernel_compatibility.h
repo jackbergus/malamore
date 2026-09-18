@@ -235,7 +235,7 @@ typedef enum _EVENT_TYPE {
     // #define InterlockedIncrement(Target)            InterlockedIncrement((volatile LONG*)(Target))
     // #define InterlockedDecrement(Target)            InterlockedDecrement((volatile LONG*)(Target))
 
-    // #define YieldProcessor()                        _mm_pause()
+    #define YieldProcessor()                        SwitchToThread()
 
 // Routine di utilità per le stringhe kernel finti
 inline void RtlInitUnicodeString(PUNICODE_STRING DestinationString, PCWSTR SourceString) {

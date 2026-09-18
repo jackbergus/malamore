@@ -218,12 +218,13 @@ NTSTATUS CorePool_RegisterHwReader(
 
     // CORREZIONE HARDWARE: Utilizziamo la funzione sicura del kernel per copiare la stringa WCHAR
     // Sostituisce wcscpy_s dello spazio utente
-    NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
-    if (!NT_SUCCESS(strStatus)) {
+    // NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
+    auto idx = MalamoreDevicePool_AddDevicePath(devicePath);
+    if (idx == -1) {
         KdPrint(("[CorePool_RegisterHwReader] Cannot copy the devicePath to ctx->DevicePath \n"));
-        return strStatus;
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
-
+    ctx->DevicePath = &g_PoolRegistry.Devices[idx].Stream;
     ctx->KeepRunning = 0;
     ctx->PhaseOffsetTicks = 0;
 
@@ -302,6 +303,11 @@ VOID CorePool_ShutdownAndClear() {
         // statically allocated. Just send the signal to stop the threads.
         auto* slot = &g_PoolRegistry.ThreadPool[i];
         slot->actualThread.Stop();
+    }
+    for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
+        if (g_PoolRegistry.Devices[i].InUse == 1) {
+            MalamoreDevicePool_CleanDeviceByIndex(i);
+        }
     }
     g_PoolRegistry.TotalAllocatedSlots = 0;
     g_PoolRegistry.CurrentHwThreadsCount = 0;
@@ -645,3 +651,87 @@ VOID DiskWriterThreadRoutine(_In_ PVOID Context) {
 
 
 #endif
+
+
+extern "C"
+void MalamoreDevicePool_Initialize(void) {
+    for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
+        RtlZeroMemory(g_PoolRegistry.Devices[i].DevicePath, MALAMORE_PATH_MAX * sizeof(WCHAR));
+        g_PoolRegistry.Devices[i].InUse = 0;
+    }
+}
+
+extern "C"
+int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath) {
+    if (devicePath == NULL || devicePath[0] == L'\0') {
+        return -1;
+    }
+
+    // 1. Cerca se il percorso esiste già nell'array statico
+    for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
+        if (g_PoolRegistry.Devices[i].InUse == 1 && wcscmp(g_PoolRegistry.Devices[i].DevicePath, devicePath) == 0) {
+            return i; // Trovato, restituisce l'indice esistente
+        }
+    }
+
+    // 2. Se non esiste ed il manager ha ancora spazio, occupa il primo slot libero
+    for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
+        if (g_PoolRegistry.Devices[i].InUse == 0) {
+            RtlStringCchCopyW(g_PoolRegistry.Devices[i].DevicePath, MALAMORE_PATH_MAX, devicePath);
+
+            // Tentativo di apertura asincrona tramite il layer di compatibilità unificato
+            NTSTATUS status = g_PoolRegistry.Devices[i].Stream.Open( devicePath, StreamFlags::Read | StreamFlags::Write);
+
+            if (NT_SUCCESS(status)) {
+                g_PoolRegistry.Devices[i].InUse = 1;
+                return i; // Apertura riuscita, restituisce l'indice
+            }
+
+            g_PoolRegistry.Devices[i].Stream.Close();
+            g_PoolRegistry.Devices[i].InUse = 0 ;
+            return -1;
+        }
+    }
+
+    return -1; // Pool esaurito
+}
+
+extern "C"
+void MalamoreDevicePool_CleanDeviceByPath(const WCHAR* devicePath) {
+    if (devicePath == NULL || devicePath[0] == L'\0') {
+        return;
+    }
+
+    for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
+        if (g_PoolRegistry.Devices[i].InUse == 1 && wcscmp(g_PoolRegistry.Devices[i].DevicePath, devicePath) == 0) {
+            // Chiude il descrittore, pulisce le stringhe e azzera lo stato della cella
+            g_PoolRegistry.Devices[i].Stream.Close();
+            g_PoolRegistry.Devices[i].InUse = 0;
+            return;
+        }
+    }
+}
+
+extern "C"
+void MalamoreDevicePool_CleanDeviceByIndex(int index) {
+    if (index < 0 || index >= MALAMORE_MAX_DEVICES) {
+        return;
+    }
+
+    if (g_PoolRegistry.Devices[index].InUse == 1) {
+        // Se l'indice è valido ed è aperto, invoca la close logica e libera l'allocazione
+        g_PoolRegistry.Devices[index].Stream.Close();
+        g_PoolRegistry.Devices[index].InUse = 0;
+    }
+}
+
+extern "C"
+MalamoreIStream* MalamoreDevicePool_GetStream(int index) {
+    if (index < 0 || index >= MALAMORE_MAX_DEVICES) {
+        return NULL;
+    }
+    if (g_PoolRegistry.Devices[index].InUse == 0) {
+        return NULL;
+    }
+    return &g_PoolRegistry.Devices[index].Stream;
+}

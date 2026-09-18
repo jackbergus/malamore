@@ -75,6 +75,10 @@ int main() {
     double max_v = -1.0;
     double min_v = std::numeric_limits<double>::max();
     double average = 0.0;
+    std::vector<std::tuple<uint64_t, uint64_t, bool>> count_ticks_before_delay;
+    uint64_t ticks_before_delay = 0;
+    uint64_t delayed_ticks = 0;
+
     std::filesystem::path file{"Malamore_Telemetry_Sink.txt"};
     if (std::filesystem::is_regular_file(file)) {
         DataChannelParcel parcel;
@@ -112,26 +116,45 @@ int main() {
                 // hex_dump(std::cout, parcel.PayloadData, parcel.DataLength, true);
                 // std::cout << "'''" << std::endl << std::endl;
                 unsigned long long messageId, currentTimestamp;
+
                 int result = sscanf_s(reinterpret_cast<char const *>(parcel.PayloadData), "Msg #%llu @%llu\n", &messageId, &currentTimestamp);
                 if (result == 2) {
                     double fromSendToRecv = parcel.Timestamp - currentTimestamp;
                     fromSendToRecv *= 1000;
                     fromSendToRecv /= ((double)telemetry.qpcFrequency.QuadPart);
                     // 2. Calcola i secondi interi e il resto dei tick
-                    if (total_messages < 4201) {
+                    if (total_messages < 3752) {
                         max_v = std::max(max_v, fromSendToRecv);
                         min_v = std::min(min_v, fromSendToRecv);
                         average += fromSendToRecv;
                         if (fromSendToRecv > 0.400) {
+                            delayed_ticks++;
                             sforamenti++;
+                            if (ticks_before_delay > 0) {
+                                count_ticks_before_delay.emplace_back(total_messages, ticks_before_delay, true);
+                                ticks_before_delay = 0;
+                            }
+                        } else {
+                            ticks_before_delay++;
+                            if (delayed_ticks > 0) {
+                                count_ticks_before_delay.emplace_back(total_messages, delayed_ticks, false);
+                                delayed_ticks = 0;
+                            }
                         }
                     }
-                    std::cout << "delay (ms): " << fromSendToRecv << std::endl;
+                    // std::cout << "delay (ms): " << fromSendToRecv << std::endl;
                 }
                 total_messages++;
             }
             fclose(fptr);
-            average /= (double)4201;
+            average /= (double)3752;
+            for (const auto& [time_begin, time_delta, event] : count_ticks_before_delay) {
+                if (event) {
+                    std::cout << "#reads <" << time_begin << ", " << time_delta << " reads before delay" << std::endl;
+                } else {
+                    std::cout << "#reads <" << time_begin << ", " << time_delta << " reads of delay" << std::endl;
+                }
+            }
             std::cout << "#Total Messages = " << total_messages << " Avg (ms) = " << average << " Min (ms) = " << min_v << " Max (ms) = " << max_v << " Sforamenti = #" << sforamenti << std::endl;
         }
         return 0;
