@@ -9,8 +9,7 @@
 #include "malamore/utility/streambuf//KernelStreamBuf.h"
 
 KernelStreamBuf::KernelStreamBuf()
-    : m_FileHandle(NULL), m_InBase(0), m_InPtr(0), m_InEnd(0), m_OutPtr(0), m_WriteFileOffset(0)
-{
+    : m_FileHandle(NULL), m_InBase(0), m_InPtr(0), m_InEnd(0), m_OutPtr(0), m_WriteFileOffset(0) {
     RtlZeroMemory(m_InputBuffer, STREAM_BUFFER_SIZE);
     RtlZeroMemory(m_OutputBuffer, STREAM_BUFFER_SIZE);
     KeInitializeEvent(&m_GlobalIoEvent, NotificationEvent, FALSE);
@@ -33,14 +32,15 @@ void KernelStreamBuf::AttachHandle(HANDLE hFile) {
 bool KernelStreamBuf::FlushOutput() {
 #ifdef PEVDEF
     if (m_OutPtr == 0) return true;
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1) return false;
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1) return false;
 
     IO_STATUS_BLOCK ioStatus;
     // Sfruttiamo l'apparato di notifica persistente della classe o locale
     KeResetEvent(&m_GlobalIoEvent);
 
     // 1. Scrittura dei dati accumulati nella sosta statica verso il File System
-    NTSTATUS status = ZwWriteFile(m_FileHandle, NULL, NULL, NULL, &ioStatus, m_OutputBuffer, static_cast<ULONG>(m_OutPtr), NULL, NULL);
+    NTSTATUS status = ZwWriteFile(m_FileHandle, NULL, NULL, NULL, &ioStatus, m_OutputBuffer,
+                                  static_cast<ULONG>(m_OutPtr), NULL, NULL);
 
     if (status == STATUS_PENDING) {
         status = KeWaitForSingleObject(&m_GlobalIoEvent, Executive, KernelMode, FALSE, NULL);
@@ -64,7 +64,7 @@ bool KernelStreamBuf::FlushOutput() {
     return false;
 #else
     if (m_OutPtr == 0) return true;
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1) return false;
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1) return false;
 
     IO_STATUS_BLOCK ioStatus;
 
@@ -127,8 +127,7 @@ bool KernelStreamBuf::FlushOutput() {
                 m_GlobalIoStatus.Status = STATUS_SUCCESS;
             }
             status = m_GlobalIoStatus.Status;
-        }
-        else {
+        } else {
             // CASO PIPE/SOCKET: Qui l'attesa asincrona è legittima e necessaria
             status = KeWaitForSingleObject(pEventObj, Executive, KernelMode, FALSE, NULL);
             if (NT_SUCCESS(status)) {
@@ -147,31 +146,31 @@ bool KernelStreamBuf::FlushOutput() {
         }
 #endif
 
-//
-//         status = KeWaitForSingleObject(&m_GlobalIoEvent, Executive, KernelMode, FALSE, NULL);
-//         if (NT_SUCCESS(status)) {
-//             KeMemoryBarrier();
-// #ifndef LINK_KERNEL
-//             DWORD bytesWrittenWin32 = 0;
-//             // Eseguiamo qui la GetOverlappedResult a transazione conclusa e svegliata,
-//             // ripopolando i contatori del nostro blocco di stato logico in totale sicurezza!
-//             // DWORD bytesWrittenWin32 = 0;
-//             // Recuperiamo i byte reali trasferiti a transazione asincrona formalmente conclusa
-//             if (GetOverlappedResult(m_FileHandle, &pEventObj->Overlapped, &bytesWrittenWin32, FALSE)) {
-//                 m_GlobalIoStatus.Information = bytesWrittenWin32;
-//                 m_GlobalIoStatus.Status = STATUS_SUCCESS;
-//             } else if (pEventObj->Overlapped.InternalHigh > 0) {
-//                 // Fallback hardware diretto sul registro del Kernel in caso di completamento differito
-//                 m_GlobalIoStatus.Information = pEventObj->Overlapped.InternalHigh;
-//                 m_GlobalIoStatus.Status = STATUS_SUCCESS;
-//             }
-// #else
-//             // In Ring 0 (Kernel) la ZwWriteFile con l'I/O Manager nativo si sincronizza regolarmente
-//             status = KeWaitForSingleObject(pEventObj, Executive, KernelMode, FALSE, NULL);
-//             if (NT_SUCCESS(status)) status = m_GlobalIoStatus.Status;
-// #endif
-//             status = ioStatus.Status;
-//         }
+        //
+        //         status = KeWaitForSingleObject(&m_GlobalIoEvent, Executive, KernelMode, FALSE, NULL);
+        //         if (NT_SUCCESS(status)) {
+        //             KeMemoryBarrier();
+        // #ifndef LINK_KERNEL
+        //             DWORD bytesWrittenWin32 = 0;
+        //             // Eseguiamo qui la GetOverlappedResult a transazione conclusa e svegliata,
+        //             // ripopolando i contatori del nostro blocco di stato logico in totale sicurezza!
+        //             // DWORD bytesWrittenWin32 = 0;
+        //             // Recuperiamo i byte reali trasferiti a transazione asincrona formalmente conclusa
+        //             if (GetOverlappedResult(m_FileHandle, &pEventObj->Overlapped, &bytesWrittenWin32, FALSE)) {
+        //                 m_GlobalIoStatus.Information = bytesWrittenWin32;
+        //                 m_GlobalIoStatus.Status = STATUS_SUCCESS;
+        //             } else if (pEventObj->Overlapped.InternalHigh > 0) {
+        //                 // Fallback hardware diretto sul registro del Kernel in caso di completamento differito
+        //                 m_GlobalIoStatus.Information = pEventObj->Overlapped.InternalHigh;
+        //                 m_GlobalIoStatus.Status = STATUS_SUCCESS;
+        //             }
+        // #else
+        //             // In Ring 0 (Kernel) la ZwWriteFile con l'I/O Manager nativo si sincronizza regolarmente
+        //             status = KeWaitForSingleObject(pEventObj, Executive, KernelMode, FALSE, NULL);
+        //             if (NT_SUCCESS(status)) status = m_GlobalIoStatus.Status;
+        // #endif
+        //             status = ioStatus.Status;
+        //         }
     }
 
 #ifndef LINK_KERNEL
@@ -232,7 +231,7 @@ bool KernelStreamBuf::Sputc(char c) {
     return true;
 }
 
-bool KernelStreamBuf::Sputn(const char* s, size_t count) {
+bool KernelStreamBuf::Sputn(const char *s, size_t count) {
     if (s == nullptr || count == 0) return false;
     for (size_t i = 0; i < count; ++i) {
         if (!Sputc(s[i])) return false;
@@ -246,7 +245,7 @@ int KernelStreamBuf::Sgetc() {
         return static_cast<unsigned char>(m_InputBuffer[m_InPtr]);
     }
 
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1) return -1;
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1) return -1;
 
     // Svuotiamo preventivamente il buffer statico di lettura
     RtlZeroMemory(m_InputBuffer, STREAM_BUFFER_SIZE);
@@ -307,9 +306,10 @@ int KernelStreamBuf::Sbumpc() {
 // IMPLEMENTAZIONE DELLE CHIAMATE HARDWARE TIMED ED ASINCRONE DENTRO IL BUFFER
 // =========================================================================
 
-NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, ULONG* bytesActuallyRead) {
+NTSTATUS KernelStreamBuf::Sgetn_Timeout(char *s, size_t count, ULONG timeoutUs, ULONG *bytesActuallyRead) {
 #ifdef PREVDEF
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1 || s == nullptr || bytesActuallyRead == nullptr) return STATUS_INVALID_PARAMETER;
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1 || s == nullptr || bytesActuallyRead == nullptr) return
+            STATUS_INVALID_PARAMETER;
     *bytesActuallyRead = 0;
 
     // Se ci sono già byte pronti nella get area della cache staticizzata, li svuotiamo subito
@@ -325,17 +325,19 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
     IO_STATUS_BLOCK ioStatus; KEVENT ioEvent;
     KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
 
-    NTSTATUS status = ZwReadFile(m_FileHandle, &ioEvent, NULL, NULL, &ioStatus, s, static_cast<ULONG>(count), NULL, NULL);
+    NTSTATUS status = ZwReadFile(m_FileHandle, &ioEvent, NULL, NULL, &ioStatus, s, static_cast<ULONG>(count), NULL,
+                                 NULL);
     if (status == STATUS_PENDING) {
         LARGE_INTEGER kernelTimeout;
         // Conversione esplicita inline da microsecondi alle unità da 100ns negative del WDK
-        kernelTimeout.QuadPart = -(LONGLONG)(timeoutUs * 10);
+        kernelTimeout.QuadPart = -(LONGLONG) (timeoutUs * 10);
         // Attesa controllata: Blocca il core logico SOLO per il budget concesso dall'utente
         NTSTATUS waitStatus = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, &kernelTimeout);
         if (waitStatus == STATUS_TIMEOUT) {
             // HARDWARE TIMEOUT COMPENSATO: La periferica o il file non hanno risposto in tempo.
             // Forza l'annullamento immediato dell'IRP orfano per non lasciare descrittori corrotti nel kernel.
-            ZwCancelIoFile(m_FileHandle, &ioStatus); Clear(); // Svuota gli indici post-cancellazione
+            ZwCancelIoFile(m_FileHandle, &ioStatus);
+            Clear(); // Svuota gli indici post-cancellazione
             Clear();
             return STATUS_TIMEOUT;
         } else {
@@ -347,31 +349,31 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
             KeMemoryBarrier(); //
 
 #ifndef LINK_KERNEL
-            // =========================================================================
-            // COMPENSAZIONE HARDWARE ASINCRONA PER RING 3 (USER-MODE)
-            // =========================================================================
-            // Poiché l'OVERLAPPED locale dentro ZwReadFile è stato smantellato dallo stack,
-            // interroghiamo l'handle di sosta tramite GetOverlappedResult passando un contesto
-            // fittizio temporaneo per estrarre l'esatto numero di byte iniettati dal kernel.
-            DWORD bytesTransferred = 0;
-            OVERLAPPED syncOverlapped;
-            RtlZeroMemory(&syncOverlapped, sizeof(OVERLAPPED));
-            syncOverlapped.hEvent = ioEvent.Handle;
+    // =========================================================================
+    // COMPENSAZIONE HARDWARE ASINCRONA PER RING 3 (USER-MODE)
+    // =========================================================================
+    // Poiché l'OVERLAPPED locale dentro ZwReadFile è stato smantellato dallo stack,
+    // interroghiamo l'handle di sosta tramite GetOverlappedResult passando un contesto
+    // fittizio temporaneo per estrarre l'esatto numero di byte iniettati dal kernel.
+    DWORD bytesTransferred = 0;
+    OVERLAPPED syncOverlapped;
+    RtlZeroMemory(&syncOverlapped, sizeof(OVERLAPPED));
+    syncOverlapped.hEvent = ioEvent.Handle;
 
-            // FALSE indica di non bloccare, poiché KeWaitForSingleObject ha già garantito lo sblocco
-            if (GetOverlappedResult(m_FileHandle, &syncOverlapped, &bytesTransferred, FALSE)) {
-                ioStatus.Information = bytesTransferred; // <--- RISOLUTIVO: Allinea forzatamente ioStatus!
-                ioStatus.Status = STATUS_SUCCESS;
-            } else {
-                // Se GetOverlappedResult fallisce perché l'handle è busy, proviamo a recuperare
-                // la dimensione tramite GetFileSize o manteniamo il fallback
-                if (GetLastError() == ERROR_PIPE_CONNECTED || GetLastError() == 0) {
-                    ioStatus.Status = STATUS_SUCCESS;
-                }
-            }
+    // FALSE indica di non bloccare, poiché KeWaitForSingleObject ha già garantito lo sblocco
+    if (GetOverlappedResult(m_FileHandle, &syncOverlapped, &bytesTransferred, FALSE)) {
+        ioStatus.Information = bytesTransferred; // <--- RISOLUTIVO: Allinea forzatamente ioStatus!
+        ioStatus.Status = STATUS_SUCCESS;
+    } else {
+        // Se GetOverlappedResult fallisce perché l'handle è busy, proviamo a recuperare
+        // la dimensione tramite GetFileSize o manteniamo il fallback
+        if (GetLastError() == ERROR_PIPE_CONNECTED || GetLastError() == 0) {
+            ioStatus.Status = STATUS_SUCCESS;
+        }
+    }
 #endif
 
-            status = ioStatus.Status;
+    status = ioStatus.Status;
         }
 
     }
@@ -380,43 +382,43 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
         // CORREZIONE HARDWARE FINALE E DEFINITIVA PER IL BUG DELLO ZERO POST-TIMEOUT
         if (ioStatus.Information == 0 && count > 0) {
 #ifndef LINK_KERNEL
-            // =========================================================================
-            // COMPENSAZIONE A LIVELLO FILE DESCRIPTOR IN USER-MODE (RING 3)
-            // =========================================================================
-            DWORD availBytes = 0;
-            // Ispeziona lo stato elettronico interno della named pipe di Windows
-            if (PeekNamedPipe(m_FileHandle, NULL, 0, NULL, &availBytes, NULL) && availBytes > 0) {
-                // Se ci sono byte intrappolati ma il contatore overlapped era corrotto,
-                // forziamo una ri-lettura sincrona immediata non bloccante per svuotare il canale
-                DWORD realBytesRead = 0;
-                // Rimuoviamo temporaneamente l'asincronia leggendo i byte reali disponibili
-                OVERLAPPED syncOv;
-                RtlZeroMemory(&syncOv, sizeof(OVERLAPPED));
-                syncOv.hEvent = ioEvent.Handle;
+    // =========================================================================
+    // COMPENSAZIONE A LIVELLO FILE DESCRIPTOR IN USER-MODE (RING 3)
+    // =========================================================================
+    DWORD availBytes = 0;
+    // Ispeziona lo stato elettronico interno della named pipe di Windows
+    if (PeekNamedPipe(m_FileHandle, NULL, 0, NULL, &availBytes, NULL) && availBytes > 0) {
+        // Se ci sono byte intrappolati ma il contatore overlapped era corrotto,
+        // forziamo una ri-lettura sincrona immediata non bloccante per svuotare il canale
+        DWORD realBytesRead = 0;
+        // Rimuoviamo temporaneamente l'asincronia leggendo i byte reali disponibili
+        OVERLAPPED syncOv;
+        RtlZeroMemory(&syncOv, sizeof(OVERLAPPED));
+        syncOv.hEvent = ioEvent.Handle;
 
-                // Questa chiamata raccoglie istantaneamente i byte scritti dal server
-                if (ReadFile(m_FileHandle, s, static_cast<DWORD>(count), &realBytesRead, &syncOv)) {
-                    ioStatus.Information = realBytesRead;
-                } else if (GetLastError() == ERROR_IO_PENDING) {
-                    GetOverlappedResult(m_FileHandle, &syncOv, &realBytesRead, TRUE);
-                    ioStatus.Information = realBytesRead;
-                }
-            }
+        // Questa chiamata raccoglie istantaneamente i byte scritti dal server
+        if (ReadFile(m_FileHandle, s, static_cast<DWORD>(count), &realBytesRead, &syncOv)) {
+            ioStatus.Information = realBytesRead;
+        } else if (GetLastError() == ERROR_IO_PENDING) {
+            GetOverlappedResult(m_FileHandle, &syncOv, &realBytesRead, TRUE);
+            ioStatus.Information = realBytesRead;
+        }
+    }
 #else
-            // =========================================================================
-            // COMPENSAZIONE A LIVELLO FILE DESCRIPTOR IN KERNEL-MODE (RING 0)
-            // =========================================================================
-            // In Ring 0 interroghiamo il blocco di stato tramite ZwFsControlFile (FSCTL_PIPE_PEEK)
-            // o riallineiamo l'IRP forzando una IoStatusBlock.Status = STATUS_SUCCESS pulita.
-            // Il kernel reale sincronizza l'Information se l'IRP viene completato dopo il MemoryBarrier.
+    // =========================================================================
+    // COMPENSAZIONE A LIVELLO FILE DESCRIPTOR IN KERNEL-MODE (RING 0)
+    // =========================================================================
+    // In Ring 0 interroghiamo il blocco di stato tramite ZwFsControlFile (FSCTL_PIPE_PEEK)
+    // o riallineiamo l'IRP forzando una IoStatusBlock.Status = STATUS_SUCCESS pulita.
+    // Il kernel reale sincronizza l'Information se l'IRP viene completato dopo il MemoryBarrier.
 #endif
         }
-        *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
-        status = STATUS_SUCCESS;
+    *bytesActuallyRead = static_cast<ULONG>(ioStatus.Information);
+    status = STATUS_SUCCESS;
     }
     return status;
 #else
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1 || s == nullptr || bytesActuallyRead == nullptr) {
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1 || s == nullptr || bytesActuallyRead == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
     *bytesActuallyRead = 0;
@@ -436,37 +438,119 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
 
     // Definiamo il tag in una cella di memoria valida sia a Ring 0 sia a Ring 3
     ULONG asyncContextKey = ASYNC_READ_TAG;
-    ULONG* keyptr = nullptr;
+    ULONG *keyptr = nullptr;
 #ifndef LINK_KERNEL
     keyptr = &asyncContextKey;
+#endif
+#ifndef LINK_KERNEL
+    // AZZERAMENTO CONSERVATIVO SALVAVITA: Cancelliamo i residui delle letture passate.
+    // In questo modo, InternalHigh sarà maggiore di zero SOLO se la ZwReadFile successiva
+    // estrarrà immediatamente e realmente dei nuovi byte in questo istante!
+    m_GlobalIoEvent.Overlapped.Internal = STATUS_PENDING;
+    m_GlobalIoEvent.Overlapped.InternalHigh = 0;
 #endif
 
     // CHIAMATA PURA UNIFICATA AGNOSTICA (Usa la ZwReadFile simulata o reale!)
     // CHIAMATA UNIFICATA SICURA AL 100%: Passiamo il puntatore alla variabile legale in Key,
     // e lasciamo ByteOffset a NULL per non far arrabbiare l'I/O Manager di Ring 0!
-    NTSTATUS status = ZwReadFile(m_FileHandle, &m_GlobalIoEvent, NULL, NULL, &m_GlobalIoStatus, s, static_cast<ULONG>(count), NULL, keyptr);
+    NTSTATUS status = ZwReadFile(m_FileHandle, &m_GlobalIoEvent, NULL, NULL, &m_GlobalIoStatus, s,
+                                 static_cast<ULONG>(count), NULL, keyptr);
 
     if (status == STATUS_PENDING) {
-        LARGE_INTEGER kernelTimeout;
-        kernelTimeout.QuadPart = -(LONGLONG)(timeoutUs * 10);
+        DWORD bytesReadWin32 = 0;
+        PKEVENT pEventObj = &m_GlobalIoEvent;
 
+#ifndef LINK_KERNEL
+        // =========================================================================
+        // CONTROLLO CONSERVATIVO PRE-ATTESA: RILEVAMENTO DATI ESTRATTI
+        // =========================================================================
+        // Interroghiamo immediatamente l'Overlapped in modalità NON BLOCCANTE (FALSE).
+        // Se restituisce TRUE, significa che il Kernel ha GIÀ estratto i dati e popolato il buffer 's'!
+        // Sovrascriviamo lo stato a SUCCESS e saltiamo completamente la KeWaitForSingleObject!
+        if (GetOverlappedResult(m_FileHandle, &pEventObj->Overlapped, &bytesReadWin32, FALSE)) {
+            //
+            m_GlobalIoStatus.Information = bytesReadWin32;
+            m_GlobalIoStatus.Status = STATUS_SUCCESS;
+            status = STATUS_SUCCESS; // Sblocco immediato inline, NO ATTESA!
+        } else if (pEventObj->Overlapped.InternalHigh > 0 && pEventObj->Overlapped.InternalHigh <= count) {
+            m_GlobalIoStatus.Information = static_cast<ULONG_PTR>(pEventObj->Overlapped.InternalHigh);
+            bytesReadWin32 = static_cast<DWORD>(pEventObj->Overlapped.InternalHigh);
+            m_GlobalIoStatus.Status = STATUS_SUCCESS;
+        }
+        if ((m_GlobalIoStatus.Status == STATUS_SUCCESS) && (strlen(s) == 0)) {
+            m_GlobalIoStatus.Status = STATUS_INVALID_PARAMETER;
+        }
+
+#endif
+
+        if (m_GlobalIoStatus.Status != STATUS_SUCCESS) {
+        LARGE_INTEGER kernelTimeout;
+        kernelTimeout.QuadPart = -(LONGLONG) (timeoutUs * 10);
+
+        // Se lo stato è ancora STATUS_PENDING, significa che la pipe è realmente vuota,
+        // e solo in questo caso attiviamo l'attesa oraria controllata del Watchdog
         NTSTATUS waitStatus = KeWaitForSingleObject(&m_GlobalIoEvent, Executive, KernelMode, FALSE, &kernelTimeout);
 
         if (waitStatus == STATUS_TIMEOUT) {
-            ZwCancelIoFile(m_FileHandle, &m_GlobalIoStatus);
-            Clear();
-            return STATUS_TIMEOUT;
+            // =========================================================================
+            // SBARRA DI ISPEZIONE CONSERVATIVA PRE-TIMEOUT: CATTURA DEL VALORE 7
+            // =========================================================================
+            KeMemoryBarrier(); // Sincronizza i core logici della CPU
+
+
+#ifndef LINK_KERNEL
+            // SBARRA TRANSAZIONALE CONSERVATIVA POST-CANCELLAZIONE:
+            // Se la cancellazione ha intercettato i byte in extremis, forziamo l'handshaking
+            // Win32 ufficiale con bWait = TRUE. Questa chiamata consolida le unioni di memoria
+            // ed estrae il 7 reale in modo sicuro, indipendentemente dall'allineamento della union!
+            DWORD bytesCancelledRead = 0;
+            if (GetOverlappedResult(m_FileHandle, &pEventObj->Overlapped, &bytesCancelledRead, TRUE)) {
+                if (bytesCancelledRead > 0 && bytesCancelledRead <= count) {
+                    m_GlobalIoStatus.Information = bytesCancelledRead;
+                    m_GlobalIoStatus.Status = STATUS_SUCCESS;
+                    status = STATUS_SUCCESS; // Convertiamo in successo ed evitiamo il timeout!
+                }
+            }
+#endif
+#ifndef LINK_KERNEL
+            // Prima di dichiarare il fallimento orario e cancellare l'I/O, interroghiamo
+            // il registro hardware nativo dell'evento persistente della classe.
+            // Se InternalHigh contiene i 7 byte, significa che l'I/O Manager ha completato
+            // la copia in RAM un istante prima della scadenza! Salviamo il messaggio!
+            if (status != STATUS_SUCCESS) {
+                KeMemoryBarrier();
+                if (pEventObj->Overlapped.InternalHigh > 0 && pEventObj->Overlapped.InternalHigh <= count) {
+                    m_GlobalIoStatus.Information = static_cast<ULONG_PTR>(pEventObj->Overlapped.InternalHigh); // Inietta il 7!
+                    m_GlobalIoStatus.Status = STATUS_SUCCESS;
+                    status = STATUS_SUCCESS; // CONVERTIAMO IL TIMEOUT IN UN SUCCESSO CERTO!
+                }
+            }
+
+            if (status != STATUS_SUCCESS) {
+                KeMemoryBarrier();
+                if (m_GlobalIoStatus.Information > 0 && m_GlobalIoStatus.Information <= count) {
+                    m_GlobalIoStatus.Status = STATUS_SUCCESS;
+                    status = STATUS_SUCCESS; // CONVERTIAMO IL TIMEOUT IN UN SUCCESSO CERTO!
+                }
+            }
+
+#endif
+            if (status != STATUS_SUCCESS) {
+                ZwCancelIoFile(m_FileHandle, &m_GlobalIoStatus);
+                Clear();
+                return STATUS_TIMEOUT;
+            }
         }
 
         KeMemoryBarrier();
-
-#ifndef LINK_KERNEL
+            if (status != STATUS_SUCCESS) {
+                #ifndef LINK_KERNEL
         // RIPRISTINO DEL CONTEGGIO OVERLAPPED COMPENSATO DA LIVELLO UTENTE:
         // Poiché l'evento si è svegliato prima del timeout, riallineiamo ioStatus.Information
         // interragando l'handle Win32 tramite GetOverlappedResult prima di convalidare.
-        DWORD bytesReadWin32 = 0;
+        bytesReadWin32 = 0;
         DWORD fileType = GetFileType(m_FileHandle);
-        PKEVENT pEventObj = &m_GlobalIoEvent;
+        pEventObj = &m_GlobalIoEvent;
 
         // Bypassiamo GetOverlappedResult. Se il Kernel ha scritto il valore 7 dentro
         // InternalHigh, lo iniettiamo a forza nella struttura che verrà letta sotto!
@@ -476,64 +560,69 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
 
             // Aggiornamento offset per i file su disco (se applicabile)
             if (GetFileType(m_FileHandle) == FILE_TYPE_DISK) {
-                ULONG64 currentOffset = (static_cast<ULONG64>(pEventObj->Overlapped.OffsetHigh) << 32) | pEventObj->Overlapped.Offset;
+                ULONG64 currentOffset = (static_cast<ULONG64>(pEventObj->Overlapped.OffsetHigh) << 32) | pEventObj->
+                                        Overlapped.Offset;
                 currentOffset += pEventObj->Overlapped.InternalHigh;
                 pEventObj->Overlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
                 pEventObj->Overlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
             }
         } else {
-                    if (GetOverlappedResult(m_FileHandle, &m_GlobalOverlapped, &bytesReadWin32, FALSE)) {
-            m_GlobalIoStatus.Information = bytesReadWin32;
-            m_GlobalIoStatus.Status = STATUS_SUCCESS;
+            if (GetOverlappedResult(m_FileHandle, &m_GlobalOverlapped, &bytesReadWin32, FALSE)) {
+                m_GlobalIoStatus.Information = bytesReadWin32;
+                m_GlobalIoStatus.Status = STATUS_SUCCESS;
 
-            if (fileType == FILE_TYPE_DISK && bytesReadWin32 > 0) {
-                /*Allucinazione: ULONG64 currentOffset = (static_cast<ULONG64>(m_GlobalOverlapped.OffsetHigh) << 32) | m_GlobalOverlapped.Offset;
-                currentOffset += bytesReadWin32;
-                m_GlobalOverlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
-                m_GlobalOverlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);*/
-                // LARGE_INTEGER moveOffset;
-                // moveOffset.QuadPart = bytesReadWin32;
-                // SetFilePointer(m_FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
-                ULONG64 currentOffset = (static_cast<ULONG64>(pEventObj->Overlapped.OffsetHigh) << 32) | pEventObj->Overlapped.Offset;
-                currentOffset += bytesReadWin32;
-                pEventObj->Overlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
-                pEventObj->Overlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
+                if (fileType == FILE_TYPE_DISK && bytesReadWin32 > 0) {
+                    /*Allucinazione: ULONG64 currentOffset = (static_cast<ULONG64>(m_GlobalOverlapped.OffsetHigh) << 32) | m_GlobalOverlapped.Offset;
+                    currentOffset += bytesReadWin32;
+                    m_GlobalOverlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
+                    m_GlobalOverlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);*/
+                    // LARGE_INTEGER moveOffset;
+                    // moveOffset.QuadPart = bytesReadWin32;
+                    // SetFilePointer(m_FileHandle, moveOffset.LowPart, &moveOffset.HighPart, FILE_CURRENT);
+                    ULONG64 currentOffset = (static_cast<ULONG64>(pEventObj->Overlapped.OffsetHigh) << 32) | pEventObj->
+                                            Overlapped.Offset;
+                    currentOffset += bytesReadWin32;
+                    pEventObj->Overlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
+                    pEventObj->Overlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
+                }
+                // // Aggiorniamo forzatamente l'offset nel contesto overlapped persistente della classe
+                // if (GetFileType(m_FileHandle) == FILE_TYPE_DISK) {
+                //     ULONG64 currentOffset = (static_cast<ULONG64>(m_GlobalOverlapped.OffsetHigh) << 32) | m_GlobalOverlapped.Offset;
+                //     currentOffset += bytesReadWin32;
+                //     m_GlobalOverlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
+                //     m_GlobalOverlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
+                // }
+            } else {
+                DWORD lastErr = GetLastError();
+
+                // CASO PARTICOLARE NAMED PIPE: Gestione dell'overflow parziale dei messaggi o disconnessioni
+                if (fileType == FILE_TYPE_PIPE) {
+                    if (lastErr == ERROR_MORE_DATA) {
+                        // Il messaggio è parzialmente estratto ma valido: allineiamo lo stato a successo
+                        m_GlobalIoStatus.Status = STATUS_SUCCESS;
+                    }
+                }
             }
-            // // Aggiorniamo forzatamente l'offset nel contesto overlapped persistente della classe
-            // if (GetFileType(m_FileHandle) == FILE_TYPE_DISK) {
-            //     ULONG64 currentOffset = (static_cast<ULONG64>(m_GlobalOverlapped.OffsetHigh) << 32) | m_GlobalOverlapped.Offset;
-            //     currentOffset += bytesReadWin32;
-            //     m_GlobalOverlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
-            //     m_GlobalOverlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
-            // }
-        } else {
-            DWORD lastErr = GetLastError();
 
-            // CASO PARTICOLARE NAMED PIPE: Gestione dell'overflow parziale dei messaggi o disconnessioni
-            if (fileType == FILE_TYPE_PIPE) {
-                if (lastErr == ERROR_MORE_DATA) {
-                    // Il messaggio è parzialmente estratto ma valido: allineiamo lo stato a successo
+            // 2. SOLUZIONE SBARRAMENTO PIPE: Se Windows restituisce 0 ma l'evento è segnalato e la pipe è attiva
+            if (fileType == FILE_TYPE_PIPE && m_GlobalIoStatus.Information == 0) {
+                // Se GetOverlappedResult ha restituito 0 a causa della Completion differita del kernel,
+                // estraiamo il numero reale di byte scritti interrogando direttamente i registri interni
+                // della struttura OVERLAPPED di sosta. Il campo InternalHigh contiene l'esatto numero
+                // di byte trasferiti dall'I/O Manager durante il Fast I/O, bypassando i bug di Win32!
+                if (m_GlobalOverlapped.InternalHigh > 0 && m_GlobalOverlapped.InternalHigh <= count) {
+                    m_GlobalIoStatus.Information = static_cast<ULONG_PTR>(m_GlobalOverlapped.InternalHigh);
+                    bytesReadWin32 = static_cast<DWORD>(m_GlobalOverlapped.InternalHigh);
                     m_GlobalIoStatus.Status = STATUS_SUCCESS;
                 }
             }
-        }
-
-        // 2. SOLUZIONE SBARRAMENTO PIPE: Se Windows restituisce 0 ma l'evento è segnalato e la pipe è attiva
-        if (fileType == FILE_TYPE_PIPE && m_GlobalIoStatus.Information == 0) {
-            // Se GetOverlappedResult ha restituito 0 a causa della Completion differita del kernel,
-            // estraiamo il numero reale di byte scritti interrogando direttamente i registri interni
-            // della struttura OVERLAPPED di sosta. Il campo InternalHigh contiene l'esatto numero
-            // di byte trasferiti dall'I/O Manager durante il Fast I/O, bypassando i bug di Win32!
-            if (m_GlobalOverlapped.InternalHigh > 0 && m_GlobalOverlapped.InternalHigh <= count) {
-                m_GlobalIoStatus.Information = static_cast<ULONG_PTR>(m_GlobalOverlapped.InternalHigh);
-                bytesReadWin32 = static_cast<DWORD>(m_GlobalOverlapped.InternalHigh);
-                m_GlobalIoStatus.Status = STATUS_SUCCESS;
-            }
-        }
-        }
 
 
+        }
 #endif
+            }
+
+        }
         status = m_GlobalIoStatus.Status;
     }
 
@@ -545,23 +634,26 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
 #endif
 }
 
-NTSTATUS KernelStreamBuf::Sgetn_Blocking(char* s, size_t count, ULONG* bytesActuallyRead) {
+NTSTATUS KernelStreamBuf::Sgetn_Blocking(char *s, size_t count, ULONG *bytesActuallyRead) {
 #ifdef PREVDEF
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1 || s == nullptr || bytesActuallyRead == nullptr) return STATUS_INVALID_PARAMETER;
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1 || s == nullptr || bytesActuallyRead == nullptr) return
+            STATUS_INVALID_PARAMETER;
     *bytesActuallyRead = 0;
 
     size_t available = m_InEnd - m_InPtr;
     if (available > 0) {
         size_t toCopy = (count < available) ? count : available;
         RtlCopyMemory(s, m_InputBuffer + m_InPtr, toCopy);
-        m_InPtr += toCopy; *bytesActuallyRead = static_cast<ULONG>(toCopy);
+        m_InPtr += toCopy;
+        *bytesActuallyRead = static_cast<ULONG>(toCopy);
         return STATUS_SUCCESS;
     }
 
     IO_STATUS_BLOCK ioStatus; KEVENT ioEvent;
     KeInitializeEvent(&ioEvent, NotificationEvent, FALSE);
 
-    NTSTATUS status = ZwReadFile(m_FileHandle, &ioEvent, NULL, NULL, &ioStatus, s, static_cast<ULONG>(count), NULL, NULL);
+    NTSTATUS status = ZwReadFile(m_FileHandle, &ioEvent, NULL, NULL, &ioStatus, s, static_cast<ULONG>(count), NULL,
+                                 NULL);
     if (status == STATUS_PENDING) {
         status = KeWaitForSingleObject(&ioEvent, Executive, KernelMode, FALSE, NULL);
         if (NT_SUCCESS(status)) {
@@ -578,7 +670,7 @@ NTSTATUS KernelStreamBuf::Sgetn_Blocking(char* s, size_t count, ULONG* bytesActu
 #else
 
 
-    if (m_FileHandle == NULL || m_FileHandle == (HANDLE)-1 || s == nullptr || bytesActuallyRead == nullptr) {
+    if (m_FileHandle == NULL || m_FileHandle == (HANDLE) -1 || s == nullptr || bytesActuallyRead == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
     *bytesActuallyRead = 0;
@@ -597,7 +689,8 @@ NTSTATUS KernelStreamBuf::Sgetn_Blocking(char* s, size_t count, ULONG* bytesActu
     m_GlobalIoStatus.Information = 0;
 
     // CHIAMATA PURA UNIFICATA IDENTICA SBARRA BLOCCANTE
-    NTSTATUS status = ZwReadFile(m_FileHandle, &m_GlobalIoEvent, NULL, NULL, &m_GlobalIoStatus, s, static_cast<ULONG>(count), NULL, NULL);
+    NTSTATUS status = ZwReadFile(m_FileHandle, &m_GlobalIoEvent, NULL, NULL, &m_GlobalIoStatus, s,
+                                 static_cast<ULONG>(count), NULL, NULL);
 
     if (status == STATUS_PENDING) {
         status = KeWaitForSingleObject(&m_GlobalIoEvent, Executive, KernelMode, FALSE, NULL);
@@ -610,7 +703,8 @@ NTSTATUS KernelStreamBuf::Sgetn_Blocking(char* s, size_t count, ULONG* bytesActu
                 m_GlobalIoStatus.Status = STATUS_SUCCESS;
 
                 if (GetFileType(m_FileHandle) == FILE_TYPE_DISK) {
-                    ULONG64 currentOffset = (static_cast<ULONG64>(m_GlobalOverlapped.OffsetHigh) << 32) | m_GlobalOverlapped.Offset;
+                    ULONG64 currentOffset = (static_cast<ULONG64>(m_GlobalOverlapped.OffsetHigh) << 32) |
+                                            m_GlobalOverlapped.Offset;
                     currentOffset += bytesReadWin32;
                     m_GlobalOverlapped.Offset = static_cast<DWORD>(currentOffset & 0xFFFFFFFF);
                     m_GlobalOverlapped.OffsetHigh = static_cast<DWORD>((currentOffset >> 32) & 0xFFFFFFFF);
@@ -625,7 +719,6 @@ NTSTATUS KernelStreamBuf::Sgetn_Blocking(char* s, size_t count, ULONG* bytesActu
         *bytesActuallyRead = static_cast<ULONG>(m_GlobalIoStatus.Information);
     }
     return status;
-
 
 
 #endif

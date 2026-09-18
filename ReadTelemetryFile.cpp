@@ -88,6 +88,7 @@ int main() {
                 }
                 firstRecord = false;
             }
+            uint64_t total_messages = 0;
             while ((bytesRead = fread(&parcel, sizeof(parcel), 1, fptr)) > 0) {
                 // Process the data in the buffer (example: print to stdout)
                 LONGLONG val;
@@ -101,9 +102,10 @@ int main() {
                 std::cout << " msg (hexdump): " << std::endl << "'''" << std::endl;
                 hex_dump(std::cout, parcel.PayloadData, parcel.DataLength, true);
                 std::cout << "'''" << std::endl << std::endl;
+                total_messages++;
             }
-
             fclose(fptr);
+            std::cout << "#Total Messages = " << total_messages << std::endl;
         }
         return 0;
     } else {

@@ -55,29 +55,45 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     // =========================================================================
     while ((&nextPeriodTime) && (&currentTime) && (Context) && KernelAtomicRead(
                &((struct UnifiedThreadContext *) Context)->KeepRunning) == 1) {
-        do {
+        /*do {
             _mm_pause();
             *((LARGE_INTEGER *) &currentTime) = KeQueryPerformanceCounter(0);
         } while ((((LARGE_INTEGER *) &currentTime)->QuadPart < ((LARGE_INTEGER *) &nextPeriodTime)->QuadPart) && (
                      KernelAtomicRead(&((struct UnifiedThreadContext *) Context)->KeepRunning) == 1));
         if (KernelAtomicRead(&((struct UnifiedThreadContext *) Context)->KeepRunning) == 0) {
             break;
-        }
+        }*/
         RtlZeroMemory(idata, HARDWARE_PAYLOAD_SIZE);
         // CONFIGURAZIONE DEL TIMEOUT RIGIDO DEL KERNEL
         status = driver.ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
+
+        unsigned long long messageId = 0;
+
+        // sscanf analizza la stringa cercando di accoppiare esattamente il testo statico
+        // ed estrae il numero tramite il quantificatore %llu
+        int result = sscanf_s(reinterpret_cast<char const *>(idata), "Msg #%llu\n", &messageId);
+
+
         if (status == STATUS_SUCCESS) {
             const ULONG64 Timestamp = (((LARGE_INTEGER *) &currentTime)->QuadPart * 1000000ULL) / ((struct UnifiedThreadContext
                               *) Context)->PerfCounterFrequency;
             status = CorePool_RouteMessageSrcToDest(Timestamp, Context->ProcessId, Context->TargetThreadId, idata, bytesActuallyRead);
             if (!NT_SUCCESS(status)) {
                 KdPrint(("There was an issue while attempting to send the response at time %llu\n", Timestamp));
+            } else {
+                KdPrint(("Msg: %p", idata));
             }
         }
         else if (status == STATUS_TIMEOUT) {
             // Timeout, continuing to navigate the system
+            if (result == 1) {
+                KdPrint(("===> %llu", messageId));
+            }
         } else {
-            KdPrint(("ERROR: %s does not allow me to continue reading: \n", NtStatusToString(status)));
+            if (result == 1) {
+                KdPrint(("ERROR: ===> %llu", messageId));
+            }
+            // KdPrint(("ERROR: %s does not allow me to continue reading: \n", NtStatusToString(status)));
         }
         if (&nextPeriodTime)
             ((LARGE_INTEGER *) &nextPeriodTime)->QuadPart += ((ULONG64) periodTicks);

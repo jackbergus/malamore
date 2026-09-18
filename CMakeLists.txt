@@ -227,3 +227,6 @@ target_link_libraries(test_architecture Catch2WithMain user_level_struct_library
 
 add_executable(read_telemetry_file ReadTelemetryFile.cpp
         src/malamore/utility/telemetry_formatter.cpp)
+
+add_executable(test_arch TestArchitecture.cpp)
+target_link_libraries(test_arch  user_level_struct_library)
