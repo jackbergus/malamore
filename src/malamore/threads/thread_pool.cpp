@@ -32,7 +32,7 @@ extern "C" VOID dumpBinaryTelemetryToFile() {
     const struct DataChannelParcel* msg = RealTimeIPC_Top(&g_PoolRegistry.TelemetryChannel);
     while (msg) {
         telemetryFile.Sputn(reinterpret_cast<const char *>(msg), sizeof(*msg));
-        KdPrint(("%s\n", msg->PayloadData));
+        // KdPrint(("%s\n", msg->PayloadData));
         RealTimeIPC_Pop(&g_PoolRegistry.TelemetryChannel);
         msg = RealTimeIPC_Top(&g_PoolRegistry.TelemetryChannel);
     }

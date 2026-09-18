@@ -98,7 +98,7 @@ NTSTATUS ReconstructFromSubsequentTickKernel(const QpcSnapshot* baseSnapshot, LO
 
     // 8. Scrittura sicura nel buffer stringa (Ring 0)
     return RtlStringCchPrintfA(outBuffer, bufferSize,
-        "%04d/%02d/%02d %02d:%02d:%02d.%09lld",
+        "UTC+0 %04d/%02d/%02d %02d:%02d:%02d.%09lld",
         tf.Year, tf.Month, tf.Day, tf.Hour, tf.Minute, tf.Second, exactNanoseconds);
 }
 

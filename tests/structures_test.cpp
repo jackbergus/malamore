@@ -7,10 +7,12 @@
 
 #include <malamore/utility/kernel_compatibility.h>
 #include <cstdint>
+#include <iostream>
 
 #include "malamore/structures/InterProcessChannelData.h"
 #include "malamore/utility/Path.h"
 #include "malamore/utility/StdStream.h"
+#include "malamore/utility/telemetry_formatter.h"
 
 TEST_CASE("InterProcessChannelData") {
     InterProcessChannelData buffer;
