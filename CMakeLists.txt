@@ -77,7 +77,8 @@ message(STATUS "Python trovato in: ${Python_EXECUTABLE}")
 set(EXPORT_DRIVER_NAME "driver_lettura")
 
 add_executable(client_malamore client_malamore.cpp
-        ReadTelemetryFile.cpp)
+        ReadTelemetryFile.cpp
+        )
 
 # Aggiunta del driver (rimosso EXCLUDE_FROM_ALL per farlo compilare di default)
 wdk_add_driver(${DRIVER_NAME}
@@ -230,3 +231,4 @@ add_executable(read_telemetry_file ReadTelemetryFile.cpp
 
 add_executable(test_arch TestArchitecture.cpp)
 target_link_libraries(test_arch  user_level_struct_library)
+add_executable(ClientReserveCPUs ClientReserveCPUs.cpp src/malamore/winapi_client/reserve_cpus.cpp)

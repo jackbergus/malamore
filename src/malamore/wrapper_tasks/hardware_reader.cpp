@@ -8,6 +8,8 @@
 #include "malamore/threads/thread_shared.h"
 #include "malamore/utility/streambuf/MalamoreIStream.h"
 
+
+
 void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct FutureResultParcel* ) {
     if (!Context) {
         KdPrint(("HardwareReaderContext] Invalid configuration (nullptr)\n"));
@@ -15,8 +17,28 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         return;
     }
 
-    SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS);
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    auto hProcess = GetCurrentProcess();
+    auto hThread = GetCurrentThread();
+    SetPriorityClass(hProcess, REALTIME_PRIORITY_CLASS);
+    SetThreadPriority(hThread, THREAD_PRIORITY_TIME_CRITICAL);
+    // =========================================================================
+    // SEMPLIFICAZIONE RISOLUTIVA: DISATTIVAZIONE DEL BOOST SENZA NTDLL
+    // =========================================================================
+    // Questa API Win32 documentata sostituisce interamente la NtSetInformationThread.
+    // Passando TRUE (DisablePriorityBoost = TRUE), ordiniamo al Kernel NT di
+    // bloccare il bilanciamento dinamico della priorità di questo thread.
+    if (!SetThreadPriorityBoost(hThread, TRUE)) {
+        KdPrint(("[MALAMORE] Impossibile disattivare il Priority Boost." ));
+    }
+    // 2. Mascheramento e isolamento dell'affinità hardware (Core Isolati)
+    // DWORD_PTR affinityMask = (1ULL << targetCoreIndex); //
+    if (!SetProcessAffinityMask(hProcess, Context->AffinityMask)) { //
+        KdPrint(("[MALAMORE] SetProcessAffinityMask fallita" ));
+    }
+    DWORD_PTR oldAffinity = SetThreadAffinityMask(hThread, Context->AffinityMask); //
+    if (oldAffinity == 0) {
+        KdPrint(("[MALAMORE] SetProcessAffinityMask error for the second time" ));
+    }
     // PROCESSOR_NUMBER idealProcessor;
     // RtlZeroMemory(&idealProcessor, sizeof(PROCESSOR_NUMBER));
     // idealProcessor.Number = 1; // Assegnazione rigida del core fisico
@@ -107,3 +129,120 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     // driver.Close();
     KeRevertToUserGroupAffinityThread(&previousAffinity);
 }
+
+#ifdef ALTERNATIVE_WITH_CYCLIC_THREADS
+// All'interno di src/malamore/wrapper_tasks/hardware_reader.cpp
+
+void HardwareReaderThreadRoutine2(struct UnifiedThreadContext* Context, struct FutureResultParcel*) {
+    if (!Context) {
+        PsTerminateSystemThread(STATUS_INVALID_PARAMETER);
+        return;
+    }
+
+    NTSTATUS status;
+    ULONG bytesActuallyRead;
+    LARGE_INTEGER currentTime, nextPeriodTime, now;
+    GROUP_AFFINITY targetAffinity, previousAffinity;
+
+    // 1. PINNING RIGIDO DEL THREAD SUL SUO CORE DEDICATO
+    RtlZeroMemory(&targetAffinity, sizeof(GROUP_AFFINITY));
+    targetAffinity.Mask = Context->AffinityMask;
+    targetAffinity.Group = 0;
+    KeSetSystemGroupAffinityThread(&targetAffinity, &previousAffinity);
+
+    // MalamoreIStream driver;
+    // status = driver.Open(Context->DevicePath, StreamFlags::Read | StreamFlags::Write);
+    // if (!NT_SUCCESS(status)) {
+    //     KeRevertToUserGroupAffinityThread(&previousAffinity);
+    //     PsTerminateSystemThread(status);
+    //     return;
+    // }
+
+    // Istanziamo il timer hardware ad alta risoluzione per la pausa non attiva
+    HANDLE hHighResTimer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (hHighResTimer == NULL) hHighResTimer = CreateWaitableTimerW(NULL, TRUE, NULL);
+
+    // =========================================================================
+    // PARAMETRIZZAZIONE GEOMETRICA DELLE M COPIE E DEGLI SFASAMENTI
+    // =========================================================================
+    const ULONG64 M = Context->CyclesPerThread;      // Numero di cicli completi assegnati a ciascun thread
+    const ULONG64 i = Context->ThreadIndex;          // Indice dell'i-esimo thread (da 0 a N-1)
+
+    // Durata hardware di un singolo ciclo logico
+    const ULONG64 periodTicks = (static_cast<ULONG64>(((struct UnifiedThreadContext*)Context)->PeriodUs) * ((struct UnifiedThreadContext*)Context)->PerfCounterFrequency) / 1000000ULL;
+    const ULONG64 halfPeriodTicks = periodTicks / 2;
+
+    ULONG64 ciclo_id = 0;
+    LARGE_INTEGER dueTime;
+
+    // 2. LOGICA DI STARTUP: Se non sono il primo thread (i != 0), mi addormento per (M - i - 2 + M/2) cicli
+    if (i > 0) {
+        ULONG64 startupSleepCycles = M - i - 2 + (M / 2);
+        ULONG64 startupSleepTicks = startupSleepCycles * periodTicks;
+        LONGLONG timeIn100ns = (startupSleepTicks * 10000000LL) / Context->PerfCounterFrequency;
+        dueTime.QuadPart = -timeIn100ns;
+        SetWaitableTimer(hHighResTimer, &dueTime, 0, NULL, NULL, FALSE);
+        WaitForSingleObjectEx(hHighResTimer, INFINITE, TRUE); // Cede il core logico senza attesa attiva
+    }
+
+    // TODO: all'esecuzione, definisci l'elemento che vuoi allocare, e determinalo di conseguenza.
+    // TODO: // Impostiamo l'ancoraggio orario iniziale per questa sessione di computazione
+    // TODO: QueryPerformanceCounter(&nextPeriodTime);
+
+    // FINCHÉ NON TERMINO (IO, COSÌ COME GLI ALTRI N-1 THREAD)
+    while (Context && KernelAtomicRead(&((struct UnifiedThreadContext *)Context)->KeepRunning) == 1) {
+
+        // ---------------------------------------------------------------------
+        // REGOLA 1: Se ho terminato i miei M cicli assegnati -> azzera ciclo_id e dormi
+        // ---------------------------------------------------------------------
+        if (ciclo_id >= M) {
+            ciclo_id = 0; // Azzera l'indice del ciclo locale
+
+            // Calcoliamo la sosta fissa di sfoltimento: M - 2 + M/2 cicli
+            ULONG64 burstSleepCycles = M - 2 + (M / 2);
+            ULONG64 burstSleepTicks = burstSleepCycles * periodTicks;
+
+            LONGLONG timeIn100ns = (burstSleepTicks * 10000000LL) / Context->PerfCounterFrequency;
+            dueTime.QuadPart = -timeIn100ns;
+
+            SetWaitableTimer(hHighResTimer, &dueTime, 0, NULL, NULL, FALSE);
+            WaitForSingleObjectEx(hHighResTimer, INFINITE, TRUE); // Sosta profonda, core libero per gli altri
+
+            // Al risveglio riallineiamo la testina temporale al tick corrente della CPU
+            QueryPerformanceCounter(&nextPeriodTime);
+        }
+
+        // ---------------------------------------------------------------------
+        // REGOLA 2: Finché non è il mio turno per inizio ciclo -> attesa attiva a regime
+        // ---------------------------------------------------------------------
+        do {
+            _mm_pause(); // Mantiene la pipeline calda ed il clock del core al massimo
+            QueryPerformanceCounter(&now);
+        } while ((now.QuadPart < nextPeriodTime.QuadPart) &&
+                 (KernelAtomicRead(&((struct UnifiedThreadContext *)Context)->KeepRunning) == 1));
+
+        if (KernelAtomicRead(&((struct UnifiedThreadContext *)Context)->KeepRunning) == 0) {
+            break;
+        }
+
+        // ---------------------------------------------------------------------
+        // REGOLA 3: Computa il ciclo logico ed incrementa il contatore
+        // ---------------------------------------------------------------------
+        bytesActuallyRead = 0;
+        status = Context->DevicePath->ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
+
+        if (status == STATUS_SUCCESS) {
+            currentTime = KeQueryPerformanceCounter(nullptr);
+            CorePool_RouteMessageSrcToDest(currentTime.QuadPart, Context->ProcessId, Context->TargetThreadId, idata, bytesActuallyRead);
+        }
+
+        // Incrementiamo il ciclo logico locale ed avanziamo la sbarra oraria del singolo passo
+        ciclo_id++;
+        nextPeriodTime.QuadPart += periodTicks;
+    }
+
+    if (hHighResTimer) CloseHandle(hHighResTimer);
+    // driver.Close();
+    KeRevertToUserGroupAffinityThread(&previousAffinity);
+}
+#endif

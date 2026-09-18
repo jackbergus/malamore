@@ -12,6 +12,8 @@
  * scheduled on reserved cores so that you can isolate real-time applications from user and kernel-level disturbances
  * by configuring affinity policies.
  *
+
+ *
  * Important!!
  *
  * Unexpected behavior occurs when a process affinity is set to reserved and unreserved CPUs. Ensure to set the affinity
@@ -23,6 +25,31 @@
  * @param mask The mask of the CPU IDs to be reserved, starting to count from the left to the right
  * @return A negative number corresponding to the type of issue being encountered, or 1 otherwise
  */
-extern "C" int SetSystemCpuSet(unsigned long mask);
+int SetSystemCpuSet(unsigned long mask);
+
+/*
+*Download the psexec tool.
+
+Run an administrative command prompt.
+
+In the command prompt, launch PowerShell under system account psexec.exe -s -i powershell.exe
+
+Execute the following script:
+
+Console
+$nameSpaceName="root\cimv2\mdm\dmmap"
+$className="MDM_WindowsIoT_SoftRealTimeProperties01"
+$obj = Get-CimInstance -Namespace $namespaceName -ClassName $className
+Add-Type -AssemblyName System.Web
+Set-CimInstance -CimInstance $obj
+$obj.SetRTCores = 3
+Set-CimInstance -CimInstance $obj
+Restart the machine to activate the change.*/
+bool AutomateSoftRealTimeCoresWinIOT(LONG nCpus);
+/**
+
+ * Quello sopra funziona prettamente per Windows IoT. Questo dovrebbe essere il comando equivalente per Windows 11 Pro
+ */
+bool AutomateCoreIsolationWin11Pro(int coresToIsolate);
 
 #endif //MALAMORE_RESERVE_CPUS_H
