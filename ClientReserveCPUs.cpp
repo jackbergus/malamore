@@ -105,7 +105,7 @@ int main() {
         ncores--;
     }
     AutomateSoftRealTimeCoresWinIOT(final_cores);
-    AutomateCoreIsolationWin11Pro(final_cores);
+    //AutomateCoreIsolationWin11Pro(final_cores);
     SetSystemCpuSet(mask);
 
     IsolateGameCoresProgrammatically();

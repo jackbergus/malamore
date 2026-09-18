@@ -27,18 +27,18 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     // Questa API Win32 documentata sostituisce interamente la NtSetInformationThread.
     // Passando TRUE (DisablePriorityBoost = TRUE), ordiniamo al Kernel NT di
     // bloccare il bilanciamento dinamico della priorità di questo thread.
-    if (!SetThreadPriorityBoost(hThread, TRUE)) {
-        KdPrint(("[MALAMORE] Impossibile disattivare il Priority Boost." ));
-    }
-    // 2. Mascheramento e isolamento dell'affinità hardware (Core Isolati)
-    // DWORD_PTR affinityMask = (1ULL << targetCoreIndex); //
-    if (!SetProcessAffinityMask(hProcess, Context->AffinityMask)) { //
-        KdPrint(("[MALAMORE] SetProcessAffinityMask fallita" ));
-    }
-    DWORD_PTR oldAffinity = SetThreadAffinityMask(hThread, Context->AffinityMask); //
-    if (oldAffinity == 0) {
-        KdPrint(("[MALAMORE] SetProcessAffinityMask error for the second time" ));
-    }
+    // if (!SetThreadPriorityBoost(hThread, TRUE)) {
+    //     KdPrint(("[MALAMORE] Impossibile disattivare il Priority Boost." ));
+    // }
+    // // 2. Mascheramento e isolamento dell'affinità hardware (Core Isolati)
+    // // DWORD_PTR affinityMask = (1ULL << targetCoreIndex); //
+    // if (!SetProcessAffinityMask(hProcess, Context->AffinityMask)) { //
+    //     KdPrint(("[MALAMORE] SetProcessAffinityMask fallita" ));
+    // }
+    // DWORD_PTR oldAffinity = SetThreadAffinityMask(hThread, Context->AffinityMask); //
+    // if (oldAffinity == 0) {
+    //     KdPrint(("[MALAMORE] SetProcessAffinityMask error for the second time" ));
+    // }
     // PROCESSOR_NUMBER idealProcessor;
     // RtlZeroMemory(&idealProcessor, sizeof(PROCESSOR_NUMBER));
     // idealProcessor.Number = 1; // Assegnazione rigida del core fisico

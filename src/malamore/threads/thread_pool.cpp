@@ -164,7 +164,7 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     ctx->MaxBudgetUs = 5000;
     ctx->TargetThreadId = -1;
     ctx->TaskFunctionPointer = TelemetrySink;
-    RtlZeroMemory(ctx->DevicePath, sizeof(ctx->DevicePath));
+    // RtlZeroMemory(ctx->DevicePath, sizeof(ctx->DevicePath));
     ctx->KeepRunning = 0;
     ctx->PhaseOffsetTicks = 0;
     g_PoolRegistry.CurrentHwThreadsCount++;
@@ -191,7 +191,7 @@ NTSTATUS CorePool_RegisterHwReader(
     // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
     struct MalamoreThreadSlot* slot = nullptr;
     struct MalamoreTaskSlot* task = nullptr;
-    for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
+    for (LONG i = MAX_TOTAL_SLOTS -1; i >= 0; ++i) {
         // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
         if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
             slot = &g_PoolRegistry.ThreadPool[i];
