@@ -6,6 +6,8 @@
 #include <iostream>
 #include <Windows.h>
 #include <string>
+
+
 #pragma comment(lib, "setupapi.lib")
 #pragma comment(lib, "advapi32.lib")
 
@@ -681,6 +683,16 @@ void runInteractive(bool showAll, bool reset) {
     }
 }
 
+#include <malamore/utility/Strings.h>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#include <tqdm.hpp>
+
 void cherryPickDeviceToHighMask(uint64_t mask, bool showAll) {
     auto devices = scanPciDevices(showAll);
     auto cpus = getCpuTopology();
@@ -700,7 +712,10 @@ void cherryPickDeviceToHighMask(uint64_t mask, bool showAll) {
     //     nCores--;
     // }
     saveBackup(devices, "affinity_backup_auto.json");
-    for (const auto& d : devices) {
+    auto A = tq::tqdm(devices);
+    A.set_prefix("Setting Devices (Phase 2): ");
+    for (auto d : A) {
+        A << " Device Name = " << wchar_to_string(d.name);
         HKEY hKey;
         if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, d.regPath.c_str(), 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
             DWORD dp = 4;

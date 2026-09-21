@@ -10,6 +10,7 @@ add_subdirectory(submodules/Catch2)
 add_subdirectory(submodules/ftxui)
 include_directories(submodules/json/include)
 include_directories(submodules/ftxui/include)
+include_directories(submodules/tqdmcpp2)
 
 # ==============================================================================
 # CONFIGURAZIONI DEL DRIVER (Modifica qui i tuoi parametri)

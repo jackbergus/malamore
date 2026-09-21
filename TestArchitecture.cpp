@@ -30,7 +30,6 @@ void main() {
     (NT_SUCCESS(hardwarePipeServer.Create(L"HWDriverSimulator", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
     (NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected2, &result)));
 
-
     auto devicePath = hardwarePipeServer.GetPath().wstring();
     auto status = CorePool_InitializeRegistry(75); // The main task is actually activated here
     (NT_SUCCESS(status));
@@ -46,7 +45,6 @@ void main() {
 
     auto start_time = std::chrono::steady_clock::now();
     auto end_time = start_time + std::chrono::seconds(60);
-
     long long iteration_count = 0;
 
     // Loop until the specified time has passed
@@ -59,5 +57,6 @@ void main() {
     }
 
     std::cout << "Iterations: " << iteration_count << std::endl;
+    CorePool_ShutdownAndClear();
 
 }

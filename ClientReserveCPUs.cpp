@@ -51,6 +51,17 @@ void MoveInterruptAwayFromGameCores(const std::wstring& deviceId, DWORD64 safeCp
     }
 }
 
+
+#include <malamore/utility/Strings.h>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#include <tqdm.hpp>
+
 bool setInterruptMaskGlobally(DWORD64 interruptMask) {
     // Maschera sicura: es. 0x1 (Solo Core 0 gestirà gli interrupt di tutto il resto del PC)
     // DWORD64 safeCpuMask = 0x1;
@@ -62,11 +73,23 @@ bool setInterruptMaskGlobally(DWORD64 interruptMask) {
 
     SP_DEVINFO_DATA devInfoData;
     devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
+    DWORD maxDevices = 0;
 
     for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData); i++) {
+        maxDevices++;
+    }
+
+    auto A = tq::trange(maxDevices);
+    A.set_prefix("Updating device: ");
+
+    for (DWORD i : A) {
+        if (!SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData)) {
+            continue;
+        }
         wchar_t instanceId[MAX_DEVICE_ID_LEN];
         if (CM_Get_Device_IDW(devInfoData.DevInst, instanceId, MAX_DEVICE_ID_LEN, 0) == CR_SUCCESS) {
             std::wstring currentDevice(instanceId);
+            A << "Device Name: " << wchar_to_string(currentDevice);
 
             // // SALVAGUARDIA: Non tocchiamo la periferica di gioco (es. la GPU dedicata)
             // if (currentDevice.find(myGameGpuId) != std::wstring::npos) {
@@ -83,14 +106,13 @@ bool setInterruptMaskGlobally(DWORD64 interruptMask) {
                 std::wcout << L"Impossibile riavviare al volo: " << currentDevice << L" (Richiederà il riavvio del PC)" << std::endl;
             }
         }
+        i++;
     }
     SetupDiDestroyDeviceInfoList(hDevInfo);
     return countImpossible > 0;
 }
 
-#ifdef min
-#undef min
-#endif
+
 
 int main() {
     // Osserva: nella macchina corrente, i core bassi sono quelli ad alte prestazioni, mentre quelli alti sono quelli
@@ -101,6 +123,7 @@ int main() {
     std::cout << "Spostamento degli interrupt hardware sconosciuti sui core di sicurezza..." << std::endl;
     uint64_t ncores = 3;
 
+    /// Step 1. Retrieving the number of
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
     uint64_t totalCores = (uint64_t)sysInfo.dwNumberOfProcessors; // Nel tuo caso: 12 logici

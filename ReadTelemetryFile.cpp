@@ -123,7 +123,7 @@ int main() {
                     fromSendToRecv *= 1000;
                     fromSendToRecv /= ((double)telemetry.qpcFrequency.QuadPart);
                     // 2. Calcola i secondi interi e il resto dei tick
-                    if (total_messages < 3757) {
+                    if (total_messages < 3633) {
                         max_v = std::max(max_v, fromSendToRecv);
                         min_v = std::min(min_v, fromSendToRecv);
                         average += fromSendToRecv;
@@ -147,7 +147,7 @@ int main() {
                 total_messages++;
             }
             fclose(fptr);
-            average /= (double)3757;
+            average /= (double)3633;
             for (const auto& [time_begin, time_delta, event] : count_ticks_before_delay) {
                 if (event) {
                     std::cout << "#reads <" << time_begin << ", " << time_delta << " reads before delay" << std::endl;

@@ -10,3 +10,6 @@
 [submodule "submodules/ftxui"]
 	path = submodules/ftxui
 	url = https://github.com/ArthurSonzogni/FTXUI
+[submodule "submodules/tqdmcpp2"]
+	path = submodules/tqdmcpp2
+	url = https://github.com/mraggi/tqdm-cpp
