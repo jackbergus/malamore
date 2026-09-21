@@ -218,6 +218,8 @@ add_library(user_level_struct_library OBJECT
         src/malamore/wrapper_tasks/telemetry_writer.cpp
 
         src/malamore/winapi_client/Win32NamedPipeGuard.cpp
+
+        src/yaucl/data/csv.cpp
 )
 
 add_executable(writing_thread_test tests/writing_thread_test.cpp)
@@ -244,3 +246,6 @@ target_link_libraries(ClientReserveCPUs
         PRIVATE ftxui::dom
         PRIVATE ftxui::component  # Not needed for this example.
 )
+
+add_executable(test_csv_read csv_reader_test.cpp)
+target_link_libraries(test_csv_read user_level_struct_library)
