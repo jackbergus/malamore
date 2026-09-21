@@ -51,9 +51,9 @@ void MoveInterruptAwayFromGameCores(const std::wstring& deviceId, DWORD64 safeCp
     }
 }
 
-bool IsolateGameCoresProgrammatically() {
+bool setInterruptMaskGlobally(DWORD64 interruptMask) {
     // Maschera sicura: es. 0x1 (Solo Core 0 gestirà gli interrupt di tutto il resto del PC)
-    DWORD64 safeCpuMask = 0x1;
+    // DWORD64 safeCpuMask = 0x1;
     uint64_t countImpossible = 0;
 
     // Prendiamo tutti i dispositivi hardware presenti nel sistema
@@ -74,7 +74,7 @@ bool IsolateGameCoresProgrammatically() {
             // }
 
             // Applica la restrizione a qualsiasi altra periferica di sistema sconosciuta
-            MoveInterruptAwayFromGameCores(currentDevice, safeCpuMask);
+            MoveInterruptAwayFromGameCores(currentDevice, interruptMask);
             // 2. Riavvia il dispositivo al volo per applicare la modifica
             if (RestartDeviceProgrammatically(hDevInfo, devInfoData)) {
                 std::wcout << L"Dispositivo riavviato con successo: " << currentDevice << std::endl;
@@ -88,27 +88,36 @@ bool IsolateGameCoresProgrammatically() {
     return countImpossible > 0;
 }
 
+#ifdef min
+#undef min
+#endif
+
 int main() {
+    // Osserva: nella macchina corrente, i core bassi sono quelli ad alte prestazioni, mentre quelli alti sono quelli
+    // a prestazioni minori. Quindi, quello che faremo è impostare tutti i driver sulle CPU alte, mentre riservare il
+    // più possibile i processori bassi.
     // ID parziale della tua GPU (trovato a runtime o passato come configurazione)
     // std::wstring myGameGpu = L"VEN_10DE"; // Esempio: NVIDIA
     std::cout << "Spostamento degli interrupt hardware sconosciuti sui core di sicurezza..." << std::endl;
-
     uint64_t ncores = 3;
-    uint64_t final_cores = 0;
-    unsigned long mask = 0;
+
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
-    int totalCores = sysInfo.dwNumberOfProcessors; // Nel tuo caso: 12 logici
-    for (int i = totalCores - 1; i >= 0 && ncores > 0; i--) {
-        mask = mask | (1 << i);
-        final_cores++;
-        ncores--;
-    }
-    AutomateSoftRealTimeCoresWinIOT(final_cores);
-    //AutomateCoreIsolationWin11Pro(final_cores);
-    SetSystemCpuSet(mask);
+    uint64_t totalCores = (uint64_t)sysInfo.dwNumberOfProcessors; // Nel tuo caso: 12 logici
 
-    IsolateGameCoresProgrammatically();
+    // Computing the masks, forsooth.
+    unsigned long mask_low = 0;
+    unsigned long mask_high = 0;
+    for (int i = 0; i < std::min(ncores, totalCores); ++i) {
+        mask_low |= (1ULL << i);
+        mask_high |= (1ULL << (totalCores-i-1));
+    }
+
+    //AutomateSoftRealTimeCoresWinIOT(final_cores); --> Setting this, just in case your OS is a IoT one. Still, this was not tested. Also, maybe has an inverted logic for CPU assignment
+    //AutomateCoreIsolationWin11Pro(final_cores); --> Removed. This actually disables the CPU rather than reserving them!
+    tryToReserveHighPerfCPUs(mask_low);
+    setInterruptMaskGlobally(mask_high);
+    cherryPickDeviceToHighMask(mask_high, true);
     std::cout << "Fatto. Nota: Le modifiche hardware di Windows richiedono un riavvio dei dispositivi o del PC per essere lette dal Kernel." << std::endl;
     return 0;
 }

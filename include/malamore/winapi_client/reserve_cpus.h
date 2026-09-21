@@ -25,7 +25,7 @@
  * @param mask The mask of the CPU IDs to be reserved, starting to count from the left to the right
  * @return A negative number corresponding to the type of issue being encountered, or 1 otherwise
  */
-int SetSystemCpuSet(unsigned long mask);
+int tryToReserveHighPerfCPUs(unsigned long mask);
 
 /*
 *Download the psexec tool.
@@ -51,5 +51,8 @@ bool AutomateSoftRealTimeCoresWinIOT(LONG nCpus);
  * Quello sopra funziona prettamente per Windows IoT. Questo dovrebbe essere il comando equivalente per Windows 11 Pro
  */
 bool AutomateCoreIsolationWin11Pro(int coresToIsolate);
+
+void runInteractive(bool showAll, bool reset);
+void cherryPickDeviceToHighMask(uint64_t mask, bool showAll);
 
 #endif //MALAMORE_RESERVE_CPUS_H

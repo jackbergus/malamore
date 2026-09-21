@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 add_subdirectory(submodules/Catch2)
+add_subdirectory(submodules/ftxui)
+include_directories(submodules/json/include)
+include_directories(submodules/ftxui/include)
 
 # ==============================================================================
 # CONFIGURAZIONI DEL DRIVER (Modifica qui i tuoi parametri)
@@ -231,4 +234,11 @@ add_executable(read_telemetry_file ReadTelemetryFile.cpp
 
 add_executable(test_arch TestArchitecture.cpp)
 target_link_libraries(test_arch  user_level_struct_library)
+
+
 add_executable(ClientReserveCPUs ClientReserveCPUs.cpp src/malamore/winapi_client/reserve_cpus.cpp)
+target_link_libraries(ClientReserveCPUs
+        PRIVATE ftxui::screen
+        PRIVATE ftxui::dom
+        PRIVATE ftxui::component  # Not needed for this example.
+)

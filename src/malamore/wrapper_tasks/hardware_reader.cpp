@@ -19,8 +19,21 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
 
     auto hProcess = GetCurrentProcess();
     auto hThread = GetCurrentThread();
+
+    // 1. Elevate the entire process to REALTIME priority class.
+    // NOTE: This requires the application to be run as Administrator.
     SetPriorityClass(hProcess, REALTIME_PRIORITY_CLASS);
+
+    // 2. Set the thread priority to TIME_CRITICAL.
+    // Combined with REALTIME_PRIORITY_CLASS, this gives you thread priority 31 (highest possible).
     SetThreadPriority(hThread, THREAD_PRIORITY_TIME_CRITICAL);
+
+    // 3. Disable priority boosting (prevents Windows from dynamically changing priority)
+    SetThreadPriorityBoost(GetCurrentThread(), TRUE);
+
+    // Call this when your real-time task starts
+    /*You can use the Windows Power Management API to prevent the system from entering low-power states while your application is running:*/
+    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
     // =========================================================================
     // SEMPLIFICAZIONE RISOLUTIVA: DISATTIVAZIONE DEL BOOST SENZA NTDLL
     // =========================================================================
@@ -93,7 +106,7 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         // RtlZeroMemory(idata, HARDWARE_PAYLOAD_SIZE);
         // CONFIGURAZIONE DEL TIMEOUT RIGIDO DEL KERNEL
         bytesActuallyRead = 0;
-\        status = Context->DevicePath->ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
+        status = Context->DevicePath->ReadWithTimeout(idata, sizeof(idata), Context->MaxBudgetUs, &bytesActuallyRead);
 
         // unsigned long long messageId = 0;
         // sscanf analizza la stringa cercando di accoppiare esattamente il testo statico

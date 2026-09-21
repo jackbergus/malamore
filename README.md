@@ -148,3 +148,37 @@ Copia la stringa alfanumerica (l'impronta) che compare a schermo. Sarà simile a
 
 Ora modifichiamo lo stadio finale di compilazione in modo che signtool.exe non usi un flag casuale (/a), ma applichi la firma legata al certificato di cui Windows si fida ciecamente.
 
+## Additional parameters, that are required to completely remove the jitter.
+
+### Disable energy saving
+
+
+```cmd
+:: Switch to High Performance Plan
+powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+
+:: Disable Core Parking (Forces all cores to stay awake)
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100
+
+:: Apply changes
+powercfg /setactive SCHEME_CURRENT
+```
+
+### Ensure that all the processes currently running on the OS are not running on my same task
+
+```cmd
+# 480 in decimal = 0x1E0 in hex = Binary 000111100000 (Cores 0-6 Allowed, Core 7 Blocked)
+$Mask = 480 
+
+# Get all running processes, filtering out critical system idles that throw access errors
+Get-Process | Where-Object { $_.Id -gt 4 -and $_.ProcessName -notmatch "Idle|System" } | ForEach-Object {
+    try {
+        $_.ProcessorAffinity = $Mask
+    }
+    catch {
+        # Catch and skip protected kernel/security processes that won't allow modification
+        Write-Verbose "Skipped protected process: $($_.ProcessName)"
+    }
+}
+```

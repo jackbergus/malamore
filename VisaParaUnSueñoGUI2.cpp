@@ -153,7 +153,7 @@ std::wstring getRegValueString(HKEY hKey, const std::wstring& subKey, const std:
     return L"";
 }
 
-std::vector<DeviceInfo> scanPciDevices(bool showAll) {
+std::vector<DeviceInfo> scanPciDevices(bool showAll = true) {
     std::vector<DeviceInfo> devices;
     HDEVINFO deviceInfoSet = SetupDiGetClassDevsW(&GUID_DEVCLASS_SYSTEM, L"PCI", NULL, DIGCF_PRESENT | DIGCF_ALLCLASSES);
     if (deviceInfoSet == INVALID_HANDLE_VALUE) return devices;
@@ -391,6 +391,7 @@ void runAutomatic(int nCores, bool showAll) {
     for (int i = 0; i < std::min((int)cpus.size(), nCores); ++i) {
         mask |= (1ULL << cpus[i].cpuIndex);
     }
+    mask = ~mask;
 
     saveBackup(devices, "affinity_backup_auto.json");
     for (const auto& d : devices) {

@@ -140,7 +140,7 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
     struct MalamoreThreadSlot* slot = nullptr;
     struct MalamoreTaskSlot* task = nullptr;
-    for (ULONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
+    for (LONG i = MAX_TOTAL_SLOTS-1; i >= 0; --i) {
         // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
         if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
             slot = &g_PoolRegistry.ThreadPool[i];
@@ -191,7 +191,7 @@ NTSTATUS CorePool_RegisterHwReader(
     // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
     struct MalamoreThreadSlot* slot = nullptr;
     struct MalamoreTaskSlot* task = nullptr;
-    for (LONG i = MAX_TOTAL_SLOTS -1; i >= 0; ++i) {
+    for (LONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
         // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
         if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
             slot = &g_PoolRegistry.ThreadPool[i];
