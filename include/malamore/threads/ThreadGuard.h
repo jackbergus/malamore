@@ -1,24 +1,16 @@
-//
-// Created by mbda on 16/09/2026.
-//
-
 #ifndef MALAMORE_THREADGUARD_H
 #define MALAMORE_THREADGUARD_H
-//
-// Created by Giacomo Bergami on 16/09/2026.
-//
 
 #include "thread_shared.h"
 #include "malamore/utility/kernel_compatibility.h"
-// #include "malamore/pool_core.h" // Per importare la definizione di UnifiedThreadContext
 
-
-
-// =========================================================================
-// PACCHETTO DI SCAMBIO STATICO AD ARCHITETTURA Ring0/Ring3 (ZERO HEAP)
-// =========================================================================
-
-
+// Rilevamento automatico della famiglia di API di Windows (Win32 vs UWP/IoT Core)
+#ifndef LINK_KERNEL
+#include <winapifamily.h>
+#if defined(WINAPI_FAMILY) && (WINAPI_FAMILY == WINAPI_FAMILY_APP)
+    #define LINK_UWP_IOT 1
+#endif
+#endif
 
 #pragma pack(push, 4)
 struct ThreadBridgePayload {
@@ -26,81 +18,57 @@ struct ThreadBridgePayload {
     PFN_FUTURE_THREAD_ROUTINE RealRoutine;
 };
 
-// =========================================================================
-// STRUTTURA UNIFICATA DI UN THREAD DEL FRAMEWORK MALAMORE
-// =========================================================================
 struct UnifiedThreadInterface {
     HANDLE ThreadHandle;
+#ifdef LINK_UWP_IOT
+    IAsyncAction^ UwpAction; // Handle logico del thread asincrono nel backend UWP/IoT Core
+#endif
     struct UnifiedThreadContext Context;
-
-    // SPECIFICA: Sostituzione dei campi sparsi con l'incapsulamento del Parcel nativo
     struct FutureResultParcel FutureResult;
-    volatile LONG IsCompleted;              // Flag atomico hardware: 0 = In esecuzione, 1 = Concluso
+    volatile LONG IsCompleted;              
 };
 #pragma pack(pop)
 
 #ifdef __cplusplus
-/**
- * This class provides an unification layer between threads at the Kernel Level and the ones at the user level
- * This is provided so that threads can be run and tested both at the user level and at the kernel level. This
- * should expedite the testing for threads
- */
 class ThreadGuard {
 private:
-    ThreadBridgePayload             fields; // Puntatore alla funzione ponte (Hardware o Tandem)
+    ThreadBridgePayload             fields; 
     BOOLEAN                        m_IsStarted;
 
-    // Disabilitiamo esplicitamente la copia e l'assegnazione per prevenire leak di Handle hardware
     ThreadGuard(const ThreadGuard&) = delete;
     ThreadGuard& operator=(const ThreadGuard&) = delete;
 
-
+    // I tre Thunk/Bridge nativi mappati a tempo di compilazione
 #ifdef LINK_KERNEL
     static VOID SystemThreadBridge(_In_ PVOID Context);
+#elif defined(LINK_UWP_IOT)
+    // Bridge per Windows::System::Threading (UWP / IoT Core)
+    void UwpThreadBridge(Windows::Foundation::IAsyncAction^ action);
 #else
     static DWORD WINAPI UserThreadBridge(LPVOID Context);
 #endif
 
 public:
-    // Il costruttore aggancia lo slot statico del pool e la routine di riferimento
     ThreadGuard(struct UnifiedThreadInterface* threadSlot = NULL,
                 PFN_FUTURE_THREAD_ROUTINE  routine = NULL);
-
-    // Il Distruttore RAII: Garantisce lo sfratto protetto automatico all'uscita dello scope
     ~ThreadGuard();
 
     VOID Init(struct UnifiedThreadInterface* threadSlot = NULL,
-                PFN_FUTURE_THREAD_ROUTINE  routine = NULL);
+              PFN_FUTURE_THREAD_ROUTINE  routine = NULL);
 
-    // Allineamento alle API Java Thread: Innesca il ciclo
     NTSTATUS Start();
-
-    // Attesa attiva deterministica sul flag hardware
     VOID Join();
-
-    // Sfratto protetto: Spegne il flag, attende la morte fisica del thread e chiude l'handle
     VOID Stop();
 
-    // =========================================================================
-    // METODO FUTURE 'GET' LOCK-FREE: Restituisce direttamente il puntatore al parcel
-    // =========================================================================
     const FutureResultParcel* Get() const {
         auto& m_ThreadSlot = this->fields.Slot;
-        auto& m_Routine = this->fields.RealRoutine;
-        if (m_ThreadSlot == nullptr)
-            return nullptr;
-
-        // Controllo atomico hardware a costo zero: se non ha completato, esce inline
-        // azzerando il jitter dell'Engine Real-Time e prevenendo la starvation
+        if (m_ThreadSlot == nullptr) return nullptr;
         if (InterlockedOr(const_cast<volatile LONG*>(&m_ThreadSlot->IsCompleted), 0) == 0) {
             return nullptr;
         }
-
-        // Restituisce direttamente l'indirizzo del parcel interno tipizzato (Zero-Copy hardware)
         return &m_ThreadSlot->FutureResult;
     }
 
-    // Metodi di ispezione dello stato
     BOOLEAN IsStarted() const { return m_IsStarted; }
 };
 #endif

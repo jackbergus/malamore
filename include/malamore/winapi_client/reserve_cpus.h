@@ -5,6 +5,9 @@
 #ifndef MALAMORE_RESERVE_CPUS_H
 #define MALAMORE_RESERVE_CPUS_H
 
+#include <cstdint>
+#include <Windows.h>
+
 /**
  * This is an extension of the WindowsIoT CSP Soft Real-Time Performance configuration
  * (https://learn.microsoft.com/en-us/windows/iot/iot-enterprise/soft-real-time/soft-real-time-device#use-mdm-bridge-wmi-provider-to-configure-the-windowsiot-csp)
@@ -54,5 +57,7 @@ bool AutomateCoreIsolationWin11Pro(int coresToIsolate);
 
 void runInteractive(bool showAll, bool reset);
 void cherryPickDeviceToHighMask(uint64_t mask, bool showAll);
+
+bool setInterruptMaskGlobally(DWORD64 interruptMask);
 
 #endif //MALAMORE_RESERVE_CPUS_H

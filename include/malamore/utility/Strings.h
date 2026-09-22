@@ -52,7 +52,7 @@ std::ostream& hex_dump(std::ostream& os, const void *buffer,
             }
             os << '\n';
             rsptr = renderString;
-            linecount = min(maxline, bufsize);
+            linecount = std::min(maxline, bufsize);
         }
     }
     // emit newline if we haven't already

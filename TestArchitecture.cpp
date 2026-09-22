@@ -57,6 +57,6 @@ void main() {
     }
 
     std::cout << "Iterations: " << iteration_count << std::endl;
-    CorePool_ShutdownAndClear();
+    // CorePool_ShutdownAndClear();
 
 }

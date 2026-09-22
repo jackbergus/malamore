@@ -1,6 +1,66 @@
 cmake_minimum_required(VERSION 4.0)
 project(malamore C CXX)
 
+# =========================================================================
+# OPZIONI DI CONFIGURAZIONE NELL'INTERFACCIA DI CLION
+# =========================================================================
+option(LINK_KERNEL "Compila in modalita Driver Ring 0 (WDK)" OFF)
+option(LINK_UWP_IOT "Compila in modalita App UWP / Windows IoT Core" OFF)
+
+# Controllo di coerenza hardware
+if(LINK_KERNEL AND LINK_UWP_IOT)
+    message(FATAL_ERROR "[MALAMORE] Impossibile abilitare contemporaneamente modalita Kernel e UWP!")
+endif()
+
+
+# =========================================================================
+# CONFIGURAZIONE STRATO 1: DRIVER KERNEL (RING 0)
+# =========================================================================
+if(LINK_KERNEL)
+    add_compile_definitions(LINK_KERNEL)
+    message(STATUS "[MALAMORE 🔥] Configurazione Build: DRIVER NATIVO (Ring 0)")
+    # [Qui inserirai le macro del WDK precedentemente consolidate]
+
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 2: APP UWP / WINDOWS IOT CORE (COMPILATORE C++/CX)
+    # =========================================================================
+    elif(LINK_UWP_IOT)
+    add_compile_definitions(WINAPI_FAMILY=WINAPI_FAMILY_APP)
+    message(STATUS "[MALAMORE 📱] Configurazione Build: UWP / WINDOWS IOT CORE (C++/CX)")
+
+    if(MSVC)
+        # 1. Abilitazione del flag hardware /ZW per digerire il simbolo '^' (Hat)
+        # 2. /EHsc- e /EHa sono tassativi: C++/CX esige la gestione delle eccezioni asincrone
+        add_compile_options(
+                /ZW
+                /EHsc-
+                /EHa
+                /ZW:nostdlib
+        )
+
+        # 3. Iniezione forzata dei metadati di Windows (platform.winmd)
+        # Permette a CLion di risolvere i tipi come Windows::System::Threading
+        string(APPEND CMAKE_CXX_FLAGS " /AI\"$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata\"")
+
+        # Sintonizziamo la SDK in base a quella installata nel sistema (es: 10.0.22621.0)
+        file(GLOB WINDOWS_10_SDK_VERSIONS RELATIVE "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata" "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata/*")
+        list(GET WINDOWS_10_SDK_VERSIONS 0 LATEST_SDK_VERSION)
+        string(APPEND CMAKE_CXX_FLAGS " /AI\"$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata/${LATEST_SDK_VERSION}\"")
+
+        # Linker flags obbligatori per emettere un binario compatibile con l'App Container
+        add_link_options(/APPCONTAINER)
+    else()
+        message(FATAL_ERROR "[MALAMORE] Il supporto C++/CX (UWP) richiede tassativamente il compilatore MSVC!")
+    endif()
+
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 3: USER-MODE DESKTOP TRADIZIONALE (RING 3)
+    # =========================================================================
+else()
+    message(STATUS "[MALAMORE 💻] Configurazione Build: USER-MODE DESKTOP (Win32)")
+    # Compilazione standard per i test sequenziali di telemetria
+endif()
+
 include_directories(include)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
