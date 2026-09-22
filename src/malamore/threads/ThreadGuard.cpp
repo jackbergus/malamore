@@ -1,9 +1,6 @@
 #include "malamore/threads/ThreadGuard.h"
 
-#ifdef LINK_UWP_IOT
-using namespace Windows::System::Threading;
-using namespace Windows::Foundation;
-#endif
+
 
 ThreadGuard::ThreadGuard(struct UnifiedThreadInterface* threadSlot, PFN_FUTURE_THREAD_ROUTINE routine)
     : fields(nullptr, nullptr), m_IsStarted(FALSE)
@@ -13,9 +10,6 @@ ThreadGuard::ThreadGuard(struct UnifiedThreadInterface* threadSlot, PFN_FUTURE_T
     if (this->fields.Slot != nullptr) {
         this->fields.Slot->ThreadHandle = NULL;
         this->fields.Slot->IsCompleted = 0;
-#ifdef LINK_UWP_IOT
-        this->fields.Slot->UwpAction = nullptr;
-#endif
     }
 }
 
@@ -57,27 +51,6 @@ VOID ThreadGuard::SystemThreadBridge(_In_ PVOID Context) {
     }
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
-#elif defined(LINK_UWP_IOT)
-void ThreadGuard::UwpThreadBridge(IAsyncAction^ action) {
-    UNREFERENCED_PARAMETER(action);
-    if (this->fields.Slot && this->fields.RealRoutine) {
-        struct FutureResultParcel staticParcel;
-        RtlZeroMemory(&staticParcel, sizeof(struct FutureResultParcel));
-
-        // Esecuzione a regime della routine sulla Named Pipe o risorsa
-        this->fields.RealRoutine(&this->fields.Slot->Context, &staticParcel);
-
-        if (staticParcel.DataLength > 0) {
-            ULONG safeLength = (staticParcel.DataLength < FUTURE_BUFFER_SIZE) ? staticParcel.DataLength : FUTURE_BUFFER_SIZE;
-            RtlCopyMemory(this->fields.Slot->FutureResult.DataBuffer, staticParcel.DataBuffer, safeLength);
-            InterlockedExchange(&this->fields.Slot->FutureResult.DataLength, static_cast<LONG>(safeLength));
-        }
-
-        MemoryBarrier();
-        InterlockedExchange(&this->fields.Slot->Context.KeepRunning, 0);
-        InterlockedExchange(&this->fields.Slot->IsCompleted, 1);
-    }
-}
 #else
 DWORD WINAPI ThreadGuard::UserThreadBridge(LPVOID Context) {
     ThreadBridgePayload* payload = reinterpret_cast<ThreadBridgePayload*>(Context);
@@ -115,12 +88,6 @@ NTSTATUS ThreadGuard::Start() {
 
 #ifdef LINK_KERNEL
     NTSTATUS status = PsCreateSystemThread(&m_ThreadSlot->ThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, SystemThreadBridge, &this->fields);
-#elif defined(LINK_UWP_IOT)
-    // Windows IoT Core UWP ThreadPool: creiamo il delegato con priorità critica
-    auto workItemHandler = ref new WorkItemHandler(this, &ThreadGuard::UwpThreadBridge);
-    m_ThreadSlot->UwpAction = ThreadPool::RunAsync(workItemHandler, WorkItemPriority::High, WorkItemOptions::TimeSliced);
-    NTSTATUS status = (m_ThreadSlot->UwpAction != nullptr) ? STATUS_SUCCESS : STATUS_INSUFFICIENT_RESOURCES;
-#define STATUS_SUCCESS 0
 #else
     DWORD threadId = 0;
     HANDLE hThread = CreateThread(NULL, 0, UserThreadBridge, &this->fields, 0, &threadId);
@@ -159,14 +126,6 @@ VOID ThreadGuard::Stop() {
     }
     ZwClose(m_ThreadSlot->ThreadHandle);
     m_ThreadSlot->ThreadHandle = NULL;
-#elif defined(LINK_UWP_IOT)
-    if (m_ThreadSlot->UwpAction != nullptr) {
-        // In UWP attendiamo il completamento orario o forziamo la cancellazione logica
-        while (m_ThreadSlot->UwpAction->Status == AsyncStatus::Started) {
-            YieldProcessor();
-        }
-        m_ThreadSlot->UwpAction = nullptr;
-    }
 #else
     if (m_ThreadSlot->ThreadHandle) {
         WaitForSingleObject(m_ThreadSlot->ThreadHandle, INFINITE);

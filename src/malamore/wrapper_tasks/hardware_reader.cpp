@@ -8,6 +8,11 @@
 #include "malamore/threads/thread_shared.h"
 #include "malamore/utility/streambuf/MalamoreIStream.h"
 
+#ifdef LINK_UWP_IOT
+// Header nativi obbligatori per sbloccare le caratteristiche Real-Time in UWP / IoT Core
+#include <avrt.h>
+#pragma comment(lib, "Avrt.lib")
+#endif
 
 
 void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct FutureResultParcel* ) {
@@ -17,6 +22,42 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
         return;
     }
 
+#ifdef LINK_KERNEL
+    // =========================================================================
+    // MODALITÀ KERNEL (RING 0): Elevazione alla massima priorità hardware
+    // =========================================================================
+    // Imposta la priorità 31 sul thread di sistema corrente.
+    // Disattiva Round-Robin e preemption ordinaria di Windows!
+    KeSetPriorityThread(KeGetCurrentThread(), HIGH_REALTIME_PRIORITY);
+
+    GROUP_AFFINITY targetAffinity, previousAffinity;
+    RtlZeroMemory(&targetAffinity, sizeof(GROUP_AFFINITY));
+    targetAffinity.Mask = Context->AffinityMask;
+    targetAffinity.Group = 0;
+    KeSetSystemGroupAffinityThread(&targetAffinity, &previousAffinity);
+
+#else
+
+#ifdef LINK_UWP_IOT
+    // =========================================================================
+    // MODALITÀ WINDOWS IOT CORE (UWP / C++/CX): AvRT Thread Characteristics
+    // =========================================================================
+    // In IoT Core, per aggirare i blocchi dell'App Container, registriamo il thread
+    // presso il sottosistema multimediale pro-RealTime del Kernel di Windows NT (MMCSS).
+    DWORD taskIndex = 0;
+    // Chiediamo la sbarra "Pro Audio" o "Realtime", che forza la priorità 31 sul silicio
+    HANDLE hAvrtTask = AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
+
+    if (hAvrtTask != NULL) {
+        // Eleviamo la priorità del task all'interno della classe Real-Time di IoT Core
+        AvSetMmThreadPriority(hAvrtTask, AVRT_PRIORITY_CRITICAL);
+    }
+
+    // Anche in UWP, l'affinità hardware si imposta tramite le API dei thread
+    DWORD_PTR affinityMask = static_cast<DWORD_PTR>(Context->AffinityMask);
+    SetThreadAffinityMask(GetCurrentThread(), affinityMask); //
+
+#endif
     auto hProcess = GetCurrentProcess();
     auto hThread = GetCurrentThread();
 
@@ -34,28 +75,6 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     // Call this when your real-time task starts
     /*You can use the Windows Power Management API to prevent the system from entering low-power states while your application is running:*/
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
-    // =========================================================================
-    // SEMPLIFICAZIONE RISOLUTIVA: DISATTIVAZIONE DEL BOOST SENZA NTDLL
-    // =========================================================================
-    // Questa API Win32 documentata sostituisce interamente la NtSetInformationThread.
-    // Passando TRUE (DisablePriorityBoost = TRUE), ordiniamo al Kernel NT di
-    // bloccare il bilanciamento dinamico della priorità di questo thread.
-    // if (!SetThreadPriorityBoost(hThread, TRUE)) {
-    //     KdPrint(("[MALAMORE] Impossibile disattivare il Priority Boost." ));
-    // }
-    // // 2. Mascheramento e isolamento dell'affinità hardware (Core Isolati)
-    // // DWORD_PTR affinityMask = (1ULL << targetCoreIndex); //
-    // if (!SetProcessAffinityMask(hProcess, Context->AffinityMask)) { //
-    //     KdPrint(("[MALAMORE] SetProcessAffinityMask fallita" ));
-    // }
-    // DWORD_PTR oldAffinity = SetThreadAffinityMask(hThread, Context->AffinityMask); //
-    // if (oldAffinity == 0) {
-    //     KdPrint(("[MALAMORE] SetProcessAffinityMask error for the second time" ));
-    // }
-    // PROCESSOR_NUMBER idealProcessor;
-    // RtlZeroMemory(&idealProcessor, sizeof(PROCESSOR_NUMBER));
-    // idealProcessor.Number = 1; // Assegnazione rigida del core fisico
-    // SetThreadIdealProcessorEx(GetCurrentThread(), &idealProcessor, NULL);
 
     NTSTATUS status;
     ULONG bytesActuallyRead;
@@ -74,17 +93,14 @@ void HardwareReaderThreadRoutine(struct UnifiedThreadContext* Context, struct Fu
     targetAffinity.Group = 0;
     KeSetSystemGroupAffinityThread(&targetAffinity, &previousAffinity);
 
-    // =========================================================================
-    // STEP 1: APERTURA DINAMICA (ACCETTA SIA DRIVERS CHE FILE NEL FILE SYSTEM)
-    // =========================================================================
-    // MalamoreIStream driver;
-    // status = driver.Open(Context->DevicePath, StreamFlags::Read | StreamFlags::Write);
-    // if (!NT_SUCCESS(status)) {
-    //     KdPrint(("[MALAMORE 🚨] Impossibile aprire la risorsa '%ws'. Errore: %s\n", Context->DevicePath, NtStatusToString(status)));
-    //     KeRevertToUserGroupAffinityThread(&previousAffinity);
-    //     PsTerminateSystemThread(status);
-    //     return;
-    // }
+    PROCESSOR_NUMBER idealProcessor;
+    RtlZeroMemory(&idealProcessor, sizeof(PROCESSOR_NUMBER));
+    // Calcoliamo l'indice del core estraendolo logaritmicamente dalla maschera di bit
+    DWORD coreIndex = 0;
+    _BitScanForward64(&coreIndex, Context->AffinityMask);
+    idealProcessor.Number = static_cast<BYTE>(coreIndex);
+    SetThreadIdealProcessorEx(hThread, &idealProcessor, NULL);
+#endif
 
     // Allineamento temporale iniziale sulla barriera comune pre-calcolata
     INIT_SYNCH_FROM_CONTEXT(&nextPeriodTime, Context, periodTicks);  //nextPeriodTime.QuadPart = Context->SynchronizedStartTicks;

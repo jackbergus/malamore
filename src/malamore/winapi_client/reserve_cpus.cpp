@@ -118,6 +118,11 @@ int SetPrivilege(HANDLE hToken, PCTSTR lpszPrivilege, bool bEnablePrivilege) {
 #include <WbemIdl.h>
 #include <iostream>
 
+#include <windows.h>
+#include <wbemidl.h>
+#include <comdef.h>
+#include <iostream>
+
 #pragma comment(lib, "wbemuuid.lib")
 
 bool AutomateSoftRealTimeCoresWinIOT(LONG nCpus) {
@@ -170,56 +175,84 @@ bool AutomateSoftRealTimeCoresWinIOT(LONG nCpus) {
         RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE
     );
 
-    IEnumWbemClassObject* pEnumerator = NULL;
-    bstr_t className = L"MDM_WindowsIoT_SoftRealTimeProperties01";
-
-    // 3. Estrazione dell'oggetto CIM memorizzato nel sistema
-    hr = pSvc->CreateInstanceEnum(className, WBEM_FLAG_RETURN_IMMEDIATELY | WBEM_FLAG_FORWARD_ONLY, NULL, &pEnumerator);
     if (FAILED(hr)) {
-        std::cerr << "[MALAMORE CIM] Impossibile interrogare la classe SoftRealTimeProperties." << std::endl;
+        std::cerr << "Could not set proxy blanket. Error code = 0x" << std::hex << hr << std::endl;
         pSvc->Release();
         pLoc->Release();
         CoUninitialize();
         return false;
     }
 
-    IWbemClassObject* pclsObj = NULL;
-    ULONG uReturn = 0;
+    // =========================================================================
+    // ESTRAZIONE DELLA DEFINIZIONE DELLA CLASSE (RISOLUZIONE PER PCLASS)
+    // =========================================================================
+    // Interroghiamo il server WMI per ottenere la classe astratta dal database CIM.
+    // Questo popola pClass consentendo la successiva GetMethod("Set").
+    IWbemClassObject* pClass = NULL;
+    bstr_t className = L"MDM_WindowsIoT_SoftRealTimeProperties01";
+    // =========================================================================
+    // ACCESSO LOGICO CHIRURGICO TRAMITE OBJECT PATH (RISOLUZIONE 80041002)
+    // =========================================================================
+    // Costruiamo il percorso esatto composto dalle chiavi primarie della classe.
+    // Questo dice al Bridge MDM quale record specifico andiamo a sovrascrivere.
+    bstr_t objectPath = L"MDM_WindowsIoT_SoftRealTimeProperties01.ParentID=\"./Vendor/MSFT/WindowsIoT\",InstanceID=\"SoftRealTimeProperties\"";
+
+    IWbemClassObject* pInstanceObj = NULL;
     bool success = false;
 
-    // Recuperiamo la prima istanza valida registrata sulla MFT logica di WMI
-    hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-    if (SUCCEEDED(hr) && uReturn > 0) {
+    // 1. Estraiamo l'istanza REALE dal Kernel di Windows invece di spawnarne una vuota
+    hr = pSvc->GetObject(objectPath, 0, NULL, &pInstanceObj, NULL);
 
-        // Modifichiamo il registro: impostiamo la proprietà SetRTCores sul valore geometrico 3
-        VARIANT vtProp;
-        vtProp.vt = VT_I4; // Tipo di dato: Intero a 32 bit (LONG)
-        vtProp.lVal = nCpus;   // Numero di core Real-Time dedicati richiesti
-
-        // Equivalente C++ di: $obj.SetRTCores = nCpus
-        hr = pclsObj->Put(L"SetRTCores", 0, &vtProp, 0);
-
-        if (SUCCEEDED(hr)) {
-            // Sincronizzazione dei metadati: inviamo l'istanza modificata all'I/O Manager di Windows
-            // Equivalente C++ di: Set-CimInstance -CimInstance $obj
-            hr = pSvc->PutInstance(pclsObj, WBEM_FLAG_UPDATE_ONLY, NULL, NULL);
-            if (SUCCEEDED(hr)) {
-                std::cout << "[MALAMORE 🔥] Core SoftRealTime configurati stabilmente a 3 sul silicio!" << std::endl;
-                success = true;
-            } else {
-                std::cerr << "[MALAMORE 🚨] PutInstance fallita: WMI ha rifiutato la configurazione hardware hardware. Codice: " << std::hex << hr << std::endl;
-            }
-        }
-        pclsObj->Release();
+    if (FAILED(hr)) {
+        std::cerr << "Could not retrieve the existing instance from Object Path. Error code = 0x" << std::hex << hr << std::endl;
+        std::cerr << "Note: Se l'errore e' 80041002 in questo punto, questa specifica classe WMI non e' supportata su questa versione di Windows." << std::endl;
+        pSvc->Release();
+        pLoc->Release();
+        CoUninitialize();
+        return false;
     }
 
-    // Svuotamento dei descrittori logici per evitare perdite di memoria
-    pEnumerator->Release();
+    // 2. L'oggetto esiste ed ha i metadati corretti. Iniettiamo il valore nCpus (es: 3)
+    VARIANT vtProp;
+    VariantInit(&vtProp);
+    vtProp.vt = VT_I4;
+    vtProp.lVal = nCpus;
+
+    hr = pInstanceObj->Put(L"SetRTCores", 0, &vtProp, 0);
+
+    if (FAILED(hr)) {
+        std::cerr << "Could not set the property value inside the instance. Error code = 0x" << std::hex << hr << std::endl;
+        pInstanceObj->Release();
+        pSvc->Release();
+        pLoc->Release();
+        CoUninitialize();
+        return false;
+    }
+
+    // =========================================================================
+    // SINCRO HARDWARE: UPDATE_ONLY SUL RECORD REALE
+    // =========================================================================
+    // Avendo estratto l'oggetto originale dal database, l'I/O Manager accettera'
+    // la modifica applicando l'override dei core Real-Time sul boot di sistema!
+    hr = pSvc->PutInstance(pInstanceObj, WBEM_FLAG_UPDATE_ONLY, NULL, NULL);
+
+    if (SUCCEEDED(hr)) {
+        std::cout << "[MALAMORE 🔥] Core SoftRealTime configurati stabilmente a " << nCpus << " core via WMI native!" << std::endl;
+        success = true;
+    } else {
+        std::cerr << "[MALAMORE 🚨] PutInstance fallita. Codice errore hardware WMI: 0x" << std::hex << hr << std::endl;
+    }
+
+    // Pulisci le risorse allocate
+    pInstanceObj->Release();
     pSvc->Release();
     pLoc->Release();
     CoUninitialize();
 
     return success;
+
+
+    return true;
 }
 
 bool AutomateCoreIsolationWin11Pro(int coresToIsolate) {

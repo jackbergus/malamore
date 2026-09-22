@@ -4,11 +4,21 @@ project(malamore C CXX)
 # =========================================================================
 # OPZIONI DI CONFIGURAZIONE NELL'INTERFACCIA DI CLION
 # =========================================================================
+
+#LINK_KERNEL (Ring 0): Significa che il codice viene compilato come un Driver di periferica nativo (.sys).
+#Viene caricato nello spazio di memoria protetto del Kernel di Windows, non ha accesso a nessuna DLL utente
+#e viene compilato usando il Windows Driver Kit (WDK).
 option(LINK_KERNEL "Compila in modalita Driver Ring 0 (WDK)" OFF)
-option(LINK_UWP_IOT "Compila in modalita App UWP / Windows IoT Core" OFF)
+
+#LINK_UWP_IOT (Ring 3 App Container): Significa che il codice viene compilato come un'Applicazione utente per
+#la piattaforma universale Windows (UWP) per girare su Windows IoT Core. Questa modalità esegue dentro una sandbox
+#protetta (App Container) a livello utente, dialoga con il runtime WinRT e viene compilata usando il Windows
+#SDK standard con le estensioni C++/CX (/ZW).
+option(LINK_UWP_IOT "Compila in modalita App UWP / Windows IoT Core" ON)
 
 # Controllo di coerenza hardware
 if(LINK_KERNEL AND LINK_UWP_IOT)
+    ## Non posso trovarmi sia in modalità Kernel, sia in modalità IoT.
     message(FATAL_ERROR "[MALAMORE] Impossibile abilitare contemporaneamente modalita Kernel e UWP!")
 endif()
 
@@ -18,54 +28,52 @@ endif()
 # =========================================================================
 if(LINK_KERNEL)
     add_compile_definitions(LINK_KERNEL)
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_VERBOSE_MAKEFILE ON)
     message(STATUS "[MALAMORE 🔥] Configurazione Build: DRIVER NATIVO (Ring 0)")
     # [Qui inserirai le macro del WDK precedentemente consolidate]
 
     # =========================================================================
     # CONFIGURAZIONE STRATO 2: APP UWP / WINDOWS IOT CORE (COMPILATORE C++/CX)
     # =========================================================================
-    elif(LINK_UWP_IOT)
-    add_compile_definitions(WINAPI_FAMILY=WINAPI_FAMILY_APP)
-    message(STATUS "[MALAMORE 📱] Configurazione Build: UWP / WINDOWS IOT CORE (C++/CX)")
-
-    if(MSVC)
-        # 1. Abilitazione del flag hardware /ZW per digerire il simbolo '^' (Hat)
-        # 2. /EHsc- e /EHa sono tassativi: C++/CX esige la gestione delle eccezioni asincrone
-        add_compile_options(
-                /ZW
-                /EHsc-
-                /EHa
-                /ZW:nostdlib
-        )
-
-        # 3. Iniezione forzata dei metadati di Windows (platform.winmd)
-        # Permette a CLion di risolvere i tipi come Windows::System::Threading
-        string(APPEND CMAKE_CXX_FLAGS " /AI\"$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata\"")
-
-        # Sintonizziamo la SDK in base a quella installata nel sistema (es: 10.0.22621.0)
-        file(GLOB WINDOWS_10_SDK_VERSIONS RELATIVE "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata" "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata/*")
-        list(GET WINDOWS_10_SDK_VERSIONS 0 LATEST_SDK_VERSION)
-        string(APPEND CMAKE_CXX_FLAGS " /AI\"$ENV{ProgramFiles\(x86\)}/Windows Kits/10/UnionMetadata/${LATEST_SDK_VERSION}\"")
-
-        # Linker flags obbligatori per emettere un binario compatibile con l'App Container
-        add_link_options(/APPCONTAINER)
-    else()
-        message(FATAL_ERROR "[MALAMORE] Il supporto C++/CX (UWP) richiede tassativamente il compilatore MSVC!")
-    endif()
-
-    # =========================================================================
-    # CONFIGURAZIONE STRATO 3: USER-MODE DESKTOP TRADIZIONALE (RING 3)
-    # =========================================================================
+elseif(LINK_UWP_IOT)
+##    add_compile_definitions(WINAPI_FAMILY=WINAPI_FAMILY_APP)
+    add_compile_definitions(LINK_UWP_IOT)
+    set(CMAKE_CXX_STANDARD 20)
+#    message(STATUS "[MALAMORE 📱] Configurazione Build: UWP / WINDOWS IOT CORE (C++/CX)")
+#    set(CMAKE_CXX_STANDARD 17)
+#
+#    if(MSVC)
+#        # SOLUZIONE 1 (CONSERVATIVA): Rimuoviamo /ZW:nostdlib.
+#        # Questo permette a MSVC di caricare in autonomia platform.winmd ed i tipi base.
+#        add_compile_options(
+#                /ZW
+#                /EHsc-
+#                /EHa
+#        )
+#
+#        # Manteniamo le inclusioni dei metadati dell'SDK per le interfacce superiori come IAsyncAction
+#        string(APPEND CMAKE_CXX_FLAGS " /AI\"C:/Program Files (x86)/Windows Kits/10/UnionMetadata\"")
+#        string(APPEND CMAKE_CXX_FLAGS " /AI\"C:/Program Files (x86)/Windows Kits/10/UnionMetadata/10.0.22621.0\"")
+#
+#        add_link_options(/APPCONTAINER)
+#    else()
+#        message(FATAL_ERROR "[MALAMORE] Il supporto C++/CX (UWP) richiede tassativamente il compilatore MSVC!")
+#    endif()
+#
+#    # =========================================================================
+#    # CONFIGURAZIONE STRATO 3: USER-MODE DESKTOP TRADIZIONALE (RING 3)
+#    # =========================================================================
 else()
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_VERBOSE_MAKEFILE ON)
     message(STATUS "[MALAMORE 💻] Configurazione Build: USER-MODE DESKTOP (Win32)")
     # Compilazione standard per i test sequenziali di telemetria
 endif()
 
 include_directories(include)
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_VERBOSE_MAKEFILE ON)
-
 add_subdirectory(submodules/Catch2)
 add_subdirectory(submodules/ftxui)
 include_directories(submodules/json/include)
@@ -300,12 +308,31 @@ add_executable(read_telemetry_file ReadTelemetryFile.cpp
 add_executable(test_arch TestArchitecture.cpp)
 target_link_libraries(test_arch  user_level_struct_library)
 
-add_executable(ClientReserveCPUs ClientReserveCPUs.cpp src/malamore/winapi_client/reserve_cpus.cpp)
-target_link_libraries(ClientReserveCPUs
-        PRIVATE ftxui::screen
-        PRIVATE ftxui::dom
-        PRIVATE ftxui::component  # Not needed for this example.
-)
 
-add_executable(test_csv_read csv_reader_test.cpp)
+
+if(LINK_KERNEL)
+
+
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 2: APP UWP / WINDOWS IOT CORE (COMPILATORE C++/CX)
+    # =========================================================================
+elseif(LINK_UWP_IOT)
+
+    add_executable(TestIoTThread TestIoTThread.cpp src/malamore/threads/ThreadGuard.cpp)
+else()
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 3: USER-MODE DESKTOP TRADIZIONALE (RING 3)
+    # Osserva che la modalità IoT non supporta l'accesso e la modifica dei registri. Devo essere per forza qui.
+    # =========================================================================
+    add_executable(ClientReserveCPUs ClientReserveCPUs.cpp src/malamore/winapi_client/reserve_cpus.cpp)
+    target_link_libraries(ClientReserveCPUs
+            PRIVATE ftxui::screen
+            PRIVATE ftxui::dom
+            PRIVATE ftxui::component  # Not needed for this example.
+    )
+endif()
+
+
+add_executable(test_csv_read csv_reader_test.cpp )
 target_link_libraries(test_csv_read user_level_struct_library)
+

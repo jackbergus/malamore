@@ -14,7 +14,7 @@ int main() {
     // ID parziale della tua GPU (trovato a runtime o passato come configurazione)
     // std::wstring myGameGpu = L"VEN_10DE"; // Esempio: NVIDIA
     std::cout << "Spostamento degli interrupt hardware sconosciuti sui core di sicurezza..." << std::endl;
-    uint64_t ncores = 3;
+    uint64_t ncores = 14;
 
     /// Step 1. Retrieving the number of
     SYSTEM_INFO sysInfo;
@@ -24,14 +24,14 @@ int main() {
     // Computing the masks, forsooth.
     unsigned long mask_low = 0;
     unsigned long mask_high = 0;
-    for (int i = 0; i < std::min(ncores, totalCores); ++i) {
-        mask_low |= (1ULL << i);
-        mask_high |= (1ULL << (totalCores-i-1));
+    for (int i = 0; i < totalCores; ++i) {
+        if (i >= totalCores-ncores) {
+            mask_high |= (1ULL << i);
+        } else if (i < ncores) {
+            mask_low |= (1ULL << i);
+        }
     }
 
-#ifdef LINK_UWP_IOT
-    AutomateSoftRealTimeCoresWinIOT(final_cores); --> Setting this, just in case your OS is a IoT one. Still, this was not tested. Also, maybe has an inverted logic for CPU assignment
-#endif
     //AutomateCoreIsolationWin11Pro(final_cores); --> Removed. This actually disables the CPU rather than reserving them!
     tryToReserveHighPerfCPUs(mask_low);
     setInterruptMaskGlobally(mask_high);

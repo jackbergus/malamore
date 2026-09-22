@@ -344,7 +344,25 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
     }
     ShareAccess |= shareMode;
 
-        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes | FILE_FLAG_OVERLAPPED, NULL);
+    FileAttributes = FileAttributes | FILE_FLAG_OVERLAPPED;
+#ifdef LINK_UWP_IOT
+    // In modalità UWP/IoT Core usiamo la CreateFile2 alimentando i parametri estesi
+    CREATEFILE2_EXTENDED_PARAMETERS extendedParams;
+    RtlZeroMemory(&extendedParams, sizeof(CREATEFILE2_EXTENDED_PARAMETERS));
+    extendedParams.dwSize = sizeof(CREATEFILE2_EXTENDED_PARAMETERS);
+
+    // Isoliamo gli attributi di base (i primi 16 bit) e i flag hardware (i bit alti come OVERLAPPED)
+
+    extendedParams.dwFileAttributes = FileAttributes & 0xFFFF;
+    extendedParams.dwFileFlags = FileAttributes & 0xFFFF0000;
+    extendedParams.dwSecurityQosFlags = SECURITY_ANONYMOUS;
+
+    HANDLE hFile = CreateFile2(win32Path, DesiredAccess, ShareAccess, creationDisposition, &extendedParams); //
+#else
+    // Modalità Desktop standard (Ring 3 classica)
+    HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes, NULL);
+#endif
+
         if (hFile == INVALID_HANDLE_VALUE) {
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
