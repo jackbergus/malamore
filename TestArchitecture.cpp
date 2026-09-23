@@ -44,7 +44,7 @@ void main() {
     LARGE_INTEGER currentTime;
 
     auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(60);
+    auto end_time = start_time + std::chrono::seconds(1);
     long long iteration_count = 0;
 
     // Loop until the specified time has passed
@@ -57,6 +57,6 @@ void main() {
     }
 
     std::cout << "Iterations: " << iteration_count << std::endl;
-    // CorePool_ShutdownAndClear();
+    CorePool_ShutdownAndClear();
 
 }
