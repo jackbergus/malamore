@@ -344,7 +344,18 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
     ShareAccess |= shareMode;
 
     FileAttributes = FileAttributes | FILE_FLAG_OVERLAPPED;
-        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes, NULL);
+    CREATEFILE2_EXTENDED_PARAMETERS extendedParams;
+    RtlZeroMemory(&extendedParams, sizeof(CREATEFILE2_EXTENDED_PARAMETERS));
+    extendedParams.dwSize = sizeof(CREATEFILE2_EXTENDED_PARAMETERS);
+
+    // Isoliamo gli attributi di base (i primi 16 bit) e i flag hardware (i bit alti come OVERLAPPED)
+
+    extendedParams.dwFileAttributes = FileAttributes & 0xFFFF;
+    extendedParams.dwFileFlags = FileAttributes & 0xFFFF0000;
+    extendedParams.dwSecurityQosFlags = SECURITY_ANONYMOUS;
+
+    HANDLE hFile = CreateFile2(win32Path, DesiredAccess, ShareAccess, creationDisposition, &extendedParams); //
+        //HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
@@ -734,8 +745,10 @@ inline void KeInitializeEvent(PKEVENT Event, EVENT_TYPE Type, BOOLEAN State) {
         // Crea un evento Win32 manual-reset o auto-reset anonimo
         /*Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
 */
-
-        Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+        if (Event->Handle == NULL)
+        {
+            Event->Handle = CreateEventW(NULL, (Type == NotificationEvent) ? TRUE : FALSE, State, NULL);
+        }
         RtlZeroMemory(&Event->Overlapped, sizeof(OVERLAPPED));
         Event->Overlapped.hEvent = Event->Handle; // Sincronizzazione automatica nativa
     }
