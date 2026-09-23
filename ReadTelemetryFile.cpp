@@ -30,7 +30,7 @@ int main() {
     std::vector<std::tuple<uint64_t, uint64_t, bool>> count_ticks_before_delay;
     uint64_t ticks_before_delay = 0;
     uint64_t delayed_ticks = 0;
-    constexpr static uint64_t n_msg = 3775;
+    constexpr static uint64_t n_msg = 63;
 
     std::filesystem::path file{"Malamore_Telemetry_Sink.txt"};
     if (std::filesystem::is_regular_file(file)) {

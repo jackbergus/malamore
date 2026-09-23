@@ -14,7 +14,7 @@ option(LINK_KERNEL "Compila in modalita Driver Ring 0 (WDK)" OFF)
 #la piattaforma universale Windows (UWP) per girare su Windows IoT Core. Questa modalità esegue dentro una sandbox
 #protetta (App Container) a livello utente, dialoga con il runtime WinRT e viene compilata usando il Windows
 #SDK standard con le estensioni C++/CX (/ZW).
-option(LINK_UWP_IOT "Compila in modalita App UWP / Windows IoT Core" ON)
+option(LINK_UWP_IOT "Compila in modalita App UWP / Windows IoT Core" OFF)
 
 # Controllo di coerenza hardware
 if(LINK_KERNEL AND LINK_UWP_IOT)
