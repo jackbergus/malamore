@@ -1,12 +1,8 @@
 //
-// Created by mbda on 16/09/2026.
-//
-
-#ifndef MALAMORE_THREADGUARD_H
-#define MALAMORE_THREADGUARD_H
-//
 // Created by Giacomo Bergami on 16/09/2026.
 //
+#ifndef MALAMORE_THREADGUARD_H
+#define MALAMORE_THREADGUARD_H
 
 #include "thread_shared.h"
 #include "malamore/utility/kernel_compatibility.h"
@@ -24,6 +20,8 @@
 struct ThreadBridgePayload {
     struct UnifiedThreadInterface* Slot;
     PFN_FUTURE_THREAD_ROUTINE RealRoutine;
+
+    ThreadBridgePayload(struct UnifiedThreadInterface* Slot, PFN_FUTURE_THREAD_ROUTINE RealRoutine) : Slot{Slot}, RealRoutine{RealRoutine} {}
 };
 
 // =========================================================================

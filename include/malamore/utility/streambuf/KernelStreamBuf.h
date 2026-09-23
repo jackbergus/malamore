@@ -71,6 +71,7 @@ public:
         RtlZeroMemory(m_InputBuffer, STREAM_BUFFER_SIZE);
         RtlZeroMemory(m_OutputBuffer, STREAM_BUFFER_SIZE);
 #ifndef LINK_KERNEL
+        KeInitializeEvent(&m_GlobalIoEvent, NotificationEvent, FALSE); // ??? REQUIRED???
         // L'AZZERAMENTO DELL'OFFSET AVVIENE SOLO QUI (UNA VOLTA SOLA ALL'INIZIO DEL FLUSSO)
         RtlZeroMemory(&m_GlobalIoEvent.Overlapped, sizeof(OVERLAPPED));
         m_GlobalIoEvent.Overlapped.hEvent = m_GlobalIoEvent.Handle;

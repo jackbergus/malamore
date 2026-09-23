@@ -150,8 +150,12 @@
 #define ASYNC_READ_TAG 0x4153594E
 #endif
 
+#ifndef FILE_APPEND_DATA
 #define FILE_APPEND_DATA              0x00000004
+#endif
+#ifndef FILE_WRITE_DATA
 #define FILE_WRITE_DATA               0x00000002
+#endif
 
 #ifndef FILE_SUPERSEDE
 #define FILE_SUPERSEDE            0x00000000 // Valore reale nel WDK
@@ -339,7 +343,8 @@ inline void InitializeObjectAttributes(POBJECT_ATTRIBUTES p, PUNICODE_STRING n, 
     }
     ShareAccess |= shareMode;
 
-        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes | FILE_FLAG_OVERLAPPED, NULL);
+    FileAttributes = FileAttributes | FILE_FLAG_OVERLAPPED;
+        HANDLE hFile = CreateFileW(win32Path, DesiredAccess, ShareAccess, NULL, creationDisposition, FileAttributes, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             IoStatusBlock->Status = STATUS_UNSUCCESSFUL;
             return STATUS_UNSUCCESSFUL;
@@ -832,9 +837,161 @@ inline NTSTATUS ZwFlushBuffersFile(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusB
     }
 }
 
+    // =========================================================================
+    // ESTENSIONI LAYER UTENTE: MAPPATURA STRUTTURE E ROUTINE TEMPORALI (RING 3)
+    // =========================================================================
+    // --- PORTING DI CSHORT IN USER MODE ---
+    typedef short CSHORT;
+    typedef short *PCSHORT;
+    // 1. Definizione della struttura TIME_FIELDS speculare al WDK di Ring 0
+    typedef struct _TIME_FIELDS {
+        CSHORT Year;          // Intervallo: [1601...]
+        CSHORT Month;         // Intervallo: [1...12]
+        CSHORT Day;           // Intervallo: [1...31]
+        CSHORT Hour;          // Intervallo: [0...23]
+        CSHORT Minute;        // Intervallo: [0...59]
+        CSHORT Second;        // Intervallo: [0...59]
+        CSHORT Milliseconds;  // Intervallo: [0...999]
+        CSHORT Weekday;       // Intervallo: [0...6] (0 = Domenica)
+    } TIME_FIELDS, *PTIME_FIELDS;
+
+    /**
+     * Mappatura unificata di RtlTimeToTimeFields per lo spazio utente (Ring 3).
+     * Scompone il tempo a 64 bit del kernel (100ns da epoca 1601) in record orari discreti.
+     */
+    inline VOID RtlTimeToTimeFields(
+        PLARGE_INTEGER Time,
+        PTIME_FIELDS TimeFields
+    ) {
+        if (Time == NULL || TimeFields == NULL) return;
+
+        FILETIME fileTime;
+        // Estrarre i registri hardware a 64 bit della coordinata oraria
+        fileTime.dwLowDateTime = Time->LowPart;
+        fileTime.dwHighDateTime = static_cast<DWORD>(Time->HighPart);
+
+        SYSTEMTIME systemTime;
+        // La system call Win32 converte l'epoca 1601 NT nativa in record in RAM
+        if (FileTimeToSystemTime(&fileTime, &systemTime)) {
+            TimeFields->Year         = static_cast<CSHORT>(systemTime.wYear);
+            TimeFields->Month        = static_cast<CSHORT>(systemTime.wMonth);
+            TimeFields->Day          = static_cast<CSHORT>(systemTime.wDay);
+            TimeFields->Hour         = static_cast<CSHORT>(systemTime.wHour);
+            TimeFields->Minute       = static_cast<CSHORT>(systemTime.wMinute);
+            TimeFields->Second       = static_cast<CSHORT>(systemTime.wSecond);
+            TimeFields->Milliseconds = static_cast<CSHORT>(systemTime.wMilliseconds);
+            TimeFields->Weekday      = static_cast<CSHORT>(systemTime.wDayOfWeek);
+        } else {
+            // Fallback di azzeramento di sicurezza se la coordinata è corrotta
+            RtlZeroMemory(TimeFields, sizeof(TIME_FIELDS));
+        }
+    }
+    // NTSTRSAFE_PSTR è un puntatore a una stringa ANSI (char*)
+    typedef PSTR  NTSTRSAFE_PSTR;
+    typedef PCSTR NTSTRSAFE_PCSTR; // Versione const (se ti dovesse servire)
+    /**
+     * Mappatura unificata di RtlStringCchPrintfA (Ansi) per lo spazio utente (Ring 3).
+     * Sfrutta l'orchestrazione sicura ad allocazione statica di strsafe.h
+     */
+    // inline NTSTATUS RtlStringCchPrintfA(
+    //     NTSTRSAFE_PSTR pszDest,
+    //     size_t cchDest,
+    //     NTSTRSAFE_PCSTR pszFormat,
+    //     ...
+    // ) {
+    //     if (pszDest == NULL || cchDest == 0 || pszFormat == NULL) {
+    //         return STATUS_INVALID_PARAMETER;
+    //     }
+    //
+    //     va_list args;
+    //     va_start(args, pszFormat);
+    //
+    //     // Invocazione della variante Win32 sicura basata su argomenti variabili (va_list)
+    //     HRESULT hr = StringCchVPrintfA(pszDest, cchDest, pszFormat, args);
+    //
+    //     va_end(args);
+    //
+    //     // Mappatura geometrica del risultato per conformità NTSTATUS
+    //     if (SUCCEEDED(hr)) {
+    //         return STATUS_SUCCESS;
+    //     } else if (hr == STRSAFE_E_INSUFFICIENT_BUFFER) {
+    //         return STATUS_BUFFER_OVERFLOW;
+    //     }
+    //
+    //     return STATUS_UNSUCCESSFUL;
+    // }
+
+
 // Abilitiamo il comando di annullamento dell'I/O asincrono per lo spazio utente
 #define ZwCancelIoFile(FileHandle, IoStatusBlock) \
 (CancelIoEx((FileHandle), NULL) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL)
+
+#include <string>
+
+// 1. Emulazione di KeQuerySystemTimePrecise per Ring 3
+// Restituisce il tempo UTC corrente in intervalli da 100 nanosecondi dal 1° gennaio 1601.
+// inline VOID KeQuerySystemTimePrecise(PLARGE_INTEGER CurrentTime) {
+//         if (!CurrentTime) return;
+//         FILETIME ft;
+//         GetSystemTimePreciseAsFileTime(&ft);
+//
+//         CurrentTime->LowPart = ft.dwLowDateTime;
+//         CurrentTime->HighPart = ft.dwHighDateTime;
+//     }
+// Istruiamo il linker a cercare il simbolo nelle librerie OneCore / MinCore di Windows.
+// Questo risolve l'errore LNK2019 / simbolo non risolto senza fare GetProcAddress.
+#pragma comment(lib, "OneCore.lib")
+// 2. Emulazione di KeQueryInterruptTime per Ring 3
+// Restituisce il tempo trascorso dal boot (inclusi i periodi di sleep/sospensione se stabili)
+// espresso in unità da 100 nanosecondi. Mappato sulla Win32 QueryInterruptTime.
+// Emulazione nativa di KeQueryInterruptTime in Ring 3 senza indirizzi fissi
+inline ULONG64 KeQueryInterruptTime() {
+    ULONGLONG interruptTimeNs100 = 0;
+
+    // QueryInterruptTimePrecise fornisce la massima accuratezza a livello hardware.
+    // È supportata nativamente a partire da Windows 10 in kernel32.dll.
+    QueryInterruptTimePrecise(&interruptTimeNs100);
+
+    return interruptTimeNs100;
+}
+
+// Emulazione di KeQuerySystemTimePrecise per Ring 3 tramite API standard
+inline VOID KeQuerySystemTimePrecise(PLARGE_INTEGER CurrentTime) {
+    if (!CurrentTime) return;
+
+    FILETIME ft;
+    // API ufficiale ad alta precisione disponibile da Windows 8 in poi
+    GetSystemTimePreciseAsFileTime(&ft);
+
+    ULARGE_INTEGER uli;
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    CurrentTime->QuadPart = uli.QuadPart;
+}
+
+// --- EMULAZIONE DI ExSystemTimeToLocalTime PER RING 3 ---
+inline VOID ExSystemTimeToLocalTime(
+    _In_  PLARGE_INTEGER SystemTime,
+    _Out_ PLARGE_INTEGER LocalTime
+) {
+    if (!SystemTime || !LocalTime) return;
+
+    // Mappiamo i LARGE_INTEGER sulle strutture FILETIME di Win32
+    FILETIME ftSystem;
+    ftSystem.dwLowDateTime = SystemTime->LowPart;
+    ftSystem.dwHighDateTime = SystemTime->HighPart;
+
+    FILETIME ftLocal;
+    // Effettua la conversione matematica sottraendo il fuso orario corrente
+    if (FileTimeToLocalFileTime(&ftSystem, &ftLocal)) {
+        LocalTime->LowPart = ftLocal.dwLowDateTime;
+        LocalTime->HighPart = ftLocal.dwHighDateTime;
+    } else {
+        // Fallback difensivo in caso di errore Win32: copia il tempo inalterato
+        LocalTime->QuadPart = SystemTime->QuadPart;
+    }
+}
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,12 +1,8 @@
-//
-// Created by Giacomo Bergami on 16/09/2026.
-//
-
 #include "malamore/threads/ThreadGuard.h"
 
 
 
-ThreadGuard::ThreadGuard(struct UnifiedThreadInterface* threadSlot, PFN_FUTURE_THREAD_ROUTINE  routine)
+ThreadGuard::ThreadGuard(struct UnifiedThreadInterface* threadSlot, PFN_FUTURE_THREAD_ROUTINE routine)
     : fields(nullptr, nullptr), m_IsStarted(FALSE)
 {
     this->fields.Slot = threadSlot;
@@ -35,7 +31,7 @@ void ThreadGuard::Init(struct UnifiedThreadInterface *threadSlot, PFN_FUTURE_THR
 }
 
 // =========================================================================
-// COPIA DI SICUREZZA DIRETTA TRA STRUTTURE COMPATTE DEL THUNK
+// IMPLEMENTAZIONE DEI THUNK / BRIDGE DI SISTEMA
 // =========================================================================
 #ifdef LINK_KERNEL
 VOID ThreadGuard::SystemThreadBridge(_In_ PVOID Context) {
@@ -43,20 +39,15 @@ VOID ThreadGuard::SystemThreadBridge(_In_ PVOID Context) {
     if (payload && payload->Slot && payload->RealRoutine) {
         struct FutureResultParcel staticParcel;
         RtlZeroMemory(&staticParcel, sizeof(struct FutureResultParcel));
-
-        // 1. Invocazione della routine che popola il buffer del parcel locale allo stack del thread
         payload->RealRoutine(&payload->Slot->Context, &staticParcel);
 
-        // 2. Controllo dei limiti fisici e copia protetta nel bersaglio dello slot statico
         if (staticParcel.DataLength > 0) {
             ULONG safeLength = (staticParcel.DataLength < FUTURE_BUFFER_SIZE) ? staticParcel.DataLength : FUTURE_BUFFER_SIZE;
-
             RtlCopyMemory(payload->Slot->FutureResult.DataBuffer, staticParcel.DataBuffer, safeLength);
             InterlockedExchange(&payload->Slot->FutureResult.DataLength, static_cast<LONG>(safeLength));
         }
-
-        KeMemoryBarrier(); // Sincronizzazione atomica hardware a livello di core CPU
-        InterlockedExchange(&payload->Slot->IsCompleted, 1); // Il Future è ora leggibile da .Get()
+        KeMemoryBarrier();
+        InterlockedExchange(&payload->Slot->IsCompleted, 1);
     }
     PsTerminateSystemThread(STATUS_SUCCESS);
 }
@@ -66,16 +57,13 @@ DWORD WINAPI ThreadGuard::UserThreadBridge(LPVOID Context) {
     if (payload && payload->Slot && payload->RealRoutine) {
         struct FutureResultParcel staticParcel;
         RtlZeroMemory(&staticParcel, sizeof(struct FutureResultParcel));
-
         payload->RealRoutine(&payload->Slot->Context, &staticParcel);
 
         if (staticParcel.DataLength > 0) {
             ULONG safeLength = (staticParcel.DataLength < FUTURE_BUFFER_SIZE) ? staticParcel.DataLength : FUTURE_BUFFER_SIZE;
-
             RtlCopyMemory(payload->Slot->FutureResult.DataBuffer, staticParcel.DataBuffer, safeLength);
             InterlockedExchange(&payload->Slot->FutureResult.DataLength, static_cast<LONG>(safeLength));
         }
-
         MemoryBarrier();
         InterlockedExchange(&payload->Slot->Context.KeepRunning, 0);
         InterlockedExchange(&payload->Slot->IsCompleted, 1);
@@ -84,22 +72,22 @@ DWORD WINAPI ThreadGuard::UserThreadBridge(LPVOID Context) {
 }
 #endif
 
+// =========================================================================
+// INNESCO ATOMICO DEL THREAD COMPILATO CONDIZIONALMENTE
+// =========================================================================
 NTSTATUS ThreadGuard::Start() {
     auto& m_ThreadSlot = this->fields.Slot;
-    auto& m_Routine = this->fields.RealRoutine;
-    if (m_ThreadSlot == nullptr || m_Routine == nullptr) {
+    if (m_ThreadSlot == nullptr || this->fields.RealRoutine == nullptr) {
         return STATUS_INVALID_PARAMETER;
     }
-    if (m_IsStarted) {
-        return STATUS_SUCCESS;
-    }
+    if (m_IsStarted) return STATUS_SUCCESS;
 
     m_ThreadSlot->Context.KeepRunning = 1;
     m_ThreadSlot->IsCompleted = 0;
     RtlZeroMemory(&m_ThreadSlot->FutureResult, sizeof(struct FutureResultParcel));
 
 #ifdef LINK_KERNEL
-    NTSTATUS status = PsCreateSystemThread(&m_ThreadSlot->ThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, SystemThreadBridge, &bridgePayload);
+    NTSTATUS status = PsCreateSystemThread(&m_ThreadSlot->ThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, SystemThreadBridge, &this->fields);
 #else
     DWORD threadId = 0;
     HANDLE hThread = CreateThread(NULL, 0, UserThreadBridge, &this->fields, 0, &threadId);
@@ -111,53 +99,40 @@ NTSTATUS ThreadGuard::Start() {
         m_IsStarted = TRUE;
     } else {
         m_ThreadSlot->Context.KeepRunning = 0;
-        m_ThreadSlot->ThreadHandle = NULL;
     }
-
     return status;
 }
 
 VOID ThreadGuard::Join() {
     auto& m_ThreadSlot = this->fields.Slot;
-    auto& m_Routine = this->fields.RealRoutine;
     if (m_ThreadSlot == nullptr || !m_IsStarted) return;
 
     while (InterlockedOr(&m_ThreadSlot->Context.KeepRunning, 0) == 1) {
-        YieldProcessor();
+        YieldProcessor(); // Attesa attiva e sintonizzazione senza blocchi
     }
 }
 
 VOID ThreadGuard::Stop() {
     auto& m_ThreadSlot = this->fields.Slot;
-    auto& m_Routine = this->fields.RealRoutine;
-    if (m_ThreadSlot == nullptr || !m_IsStarted || m_ThreadSlot->ThreadHandle == NULL) {
-        return;
-    }
+    if (m_ThreadSlot == nullptr || !m_IsStarted) return;
 
     InterlockedExchange(&m_ThreadSlot->Context.KeepRunning, 0);
 
 #ifdef LINK_KERNEL
     PVOID threadObject = nullptr;
-    NTSTATUS status = ObReferenceObjectByHandle(
-        m_ThreadSlot->ThreadHandle,
-        THREAD_ALL_ACCESS,
-        *PsThreadType,
-        KernelMode,
-        &threadObject,
-        NULL
-    );
-
-    if (NT_SUCCESS(status)) {
+    if (m_ThreadSlot->ThreadHandle && NT_SUCCESS(ObReferenceObjectByHandle(m_ThreadSlot->ThreadHandle, THREAD_ALL_ACCESS, *PsThreadType, KernelMode, &threadObject, NULL))) {
         KeWaitForSingleObject(threadObject, Executive, KernelMode, FALSE, NULL);
         ObDereferenceObject(threadObject);
     }
     ZwClose(m_ThreadSlot->ThreadHandle);
+    m_ThreadSlot->ThreadHandle = NULL;
 #else
-    WaitForSingleObject(m_ThreadSlot->ThreadHandle, INFINITE);
-    CloseHandle(m_ThreadSlot->ThreadHandle);
+    if (m_ThreadSlot->ThreadHandle) {
+        WaitForSingleObject(m_ThreadSlot->ThreadHandle, INFINITE);
+        CloseHandle(m_ThreadSlot->ThreadHandle);
+        m_ThreadSlot->ThreadHandle = NULL;
+    }
 #endif
 
-    m_ThreadSlot->ThreadHandle = NULL;
     m_IsStarted = FALSE;
 }
-

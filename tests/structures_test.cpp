@@ -109,7 +109,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
     MalamorePath some_file_path((WCHAR*)L"my_file.txt");
 
     {
-        MalamoreOStream file_output{};
+        MalamoreIOStream file_output{};
         REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamFlags::Creat | StreamFlags::Trunc | StreamFlags::Write)));
 
         file_output << "this is a new line" << "\n" <<sflush;
@@ -118,7 +118,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
 
     {
         char buffer[1024];
-        MalamoreIStream file_input{};
+        MalamoreIOStream file_input{};
         REQUIRE(NT_SUCCESS(file_input.Open(some_file_path, StreamFlags::Read)));
 
         file_input.GetLine(buffer, sizeof(buffer));
@@ -128,7 +128,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
     }
 
     {
-        MalamoreOStream file_output{};
+        MalamoreIOStream file_output{};
         REQUIRE(NT_SUCCESS(file_output.Open(some_file_path, StreamFlags::Append | StreamFlags::Write)));
 
         file_output << "this is the last and appended line" << "\n";
@@ -136,7 +136,7 @@ TEST_CASE("FILE WRITING AND READING [casusu]") {
 
     {
         char buffer[1024];
-        MalamoreIStream file_input{};
+        MalamoreIOStream file_input{};
         REQUIRE(NT_SUCCESS(file_input.Open(some_file_path, StreamFlags::Read)));
 
         file_input.GetLine(buffer, sizeof(buffer));

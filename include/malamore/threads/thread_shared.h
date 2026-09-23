@@ -4,6 +4,7 @@
 
 #ifndef MALAMORE_THREAD_SHARED_H
 #define MALAMORE_THREAD_SHARED_H
+#include "malamore/utility/streambuf/MalamoreIStream.h"
 
 
 #ifdef LINK_KERNEL

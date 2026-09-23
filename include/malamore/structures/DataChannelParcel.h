@@ -7,15 +7,15 @@
 
 #ifndef  DataChannelParcelArraySize
 #define     DataChannelParcelArraySize      (1024)
-#include "malamore/utility/kernel_compatibility.h"
 #endif
+#include <malamore/utility/kernel_compatibility.h>
 
-// Structure representing the metadata you would save per session
+/*// Structure representing the metadata you would save per session
 struct QpcSnapshot {
     ULONGLONG bootTimeMsSinceEpoch; // Saved boot time (Unix epoch milliseconds)
     LARGE_INTEGER qpcTicks;         // The QPC ticks collected
     LARGE_INTEGER qpcFrequency;     // QPC frequency at the time of collection
-};
+};*/
 
 
     struct DataChannelParcel {

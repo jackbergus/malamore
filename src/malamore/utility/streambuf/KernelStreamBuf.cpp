@@ -441,6 +441,13 @@ NTSTATUS KernelStreamBuf::Sgetn_Timeout(char* s, size_t count, ULONG timeoutUs, 
     keyptr = &asyncContextKey;
 #endif
 
+    /* delta
+    * #ifndef LINK_KERNEL
+    // BONIFICA PREVENTIVA: Elimina i fantasmi del passato azzerando i registri prima dell'I/O
+    m_GlobalIoEvent.Overlapped.Internal = STATUS_PENDING;
+    m_GlobalIoEvent.Overlapped.InternalHigh = 0;
+#endif*/
+
     // CHIAMATA PURA UNIFICATA AGNOSTICA (Usa la ZwReadFile simulata o reale!)
     // CHIAMATA UNIFICATA SICURA AL 100%: Passiamo il puntatore alla variabile legale in Key,
     // e lasciamo ByteOffset a NULL per non far arrabbiare l'I/O Manager di Ring 0!

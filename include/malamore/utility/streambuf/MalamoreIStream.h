@@ -1,5 +1,5 @@
 //
-// Created by mbda on 16/09/2026.
+// Created by Giacomo Bergami, PhD on 16/09/2026.
 //
 
 #ifndef MALAMORE_MALAMOREISTREAM_H
@@ -23,6 +23,10 @@ public:
     MalamoreIStream();
     ~MalamoreIStream();
 
+    MalamoreIStream(const MalamoreIStream&) = delete;
+    MalamoreIStream(MalamoreIStream&&) = delete;
+    MalamoreIStream& operator=(const MalamoreIStream&) = delete;
+    MalamoreIStream& operator=(MalamoreIStream&&) = delete;
     NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
     BOOLEAN IsOpen() const { return original.IsOpen(); }

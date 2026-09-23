@@ -4,8 +4,8 @@
 #define POOL_ZERO_DOWN_LEVEL_SUPPORT 1
 #include <ntddk.h>
 #include "malamore/task_registry.h"
-
-
+#include <malamore/driver_utility.h>
+#include <malamore/shared.h>
 
 
 #define CODA_MAX_MESSAGGI     4096
