@@ -1,12 +1,84 @@
 cmake_minimum_required(VERSION 4.0)
 project(malamore C CXX)
 
-include_directories(include)
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_VERBOSE_MAKEFILE ON)
+# =========================================================================
+# OPZIONI DI CONFIGURAZIONE NELL'INTERFACCIA DI CLION
+# =========================================================================
 
+#LINK_KERNEL (Ring 0): Significa che il codice viene compilato come un Driver di periferica nativo (.sys).
+#Viene caricato nello spazio di memoria protetto del Kernel di Windows, non ha accesso a nessuna DLL utente
+#e viene compilato usando il Windows Driver Kit (WDK).
+option(LINK_KERNEL "Compila in modalita Driver Ring 0 (WDK)" OFF)
+
+#LINK_UWP_IOT (Ring 3 App Container): Significa che il codice viene compilato come un'Applicazione utente per
+#la piattaforma universale Windows (UWP) per girare su Windows IoT Core. Questa modalità esegue dentro una sandbox
+#protetta (App Container) a livello utente, dialoga con il runtime WinRT e viene compilata usando il Windows
+#SDK standard con le estensioni C++/CX (/ZW).
+option(LINK_UWP_IOT "Compila in modalita App UWP / Windows IoT Core" OFF)
+
+# Controllo di coerenza hardware
+if(LINK_KERNEL AND LINK_UWP_IOT)
+    ## Non posso trovarmi sia in modalità Kernel, sia in modalità IoT.
+    message(FATAL_ERROR "[MALAMORE] Impossibile abilitare contemporaneamente modalita Kernel e UWP!")
+endif()
+
+
+# =========================================================================
+# CONFIGURAZIONE STRATO 1: DRIVER KERNEL (RING 0)
+# =========================================================================
+if(LINK_KERNEL)
+    add_compile_definitions(LINK_KERNEL)
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_VERBOSE_MAKEFILE ON)
+    message(STATUS "[MALAMORE 🔥] Configurazione Build: DRIVER NATIVO (Ring 0)")
+    # [Qui inserirai le macro del WDK precedentemente consolidate]
+
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 2: APP UWP / WINDOWS IOT CORE (COMPILATORE C++/CX)
+    # =========================================================================
+elseif(LINK_UWP_IOT)
+    ##    add_compile_definitions(WINAPI_FAMILY=WINAPI_FAMILY_APP)
+    add_compile_definitions(LINK_UWP_IOT)
+    set(CMAKE_CXX_STANDARD 20)
+    #    message(STATUS "[MALAMORE 📱] Configurazione Build: UWP / WINDOWS IOT CORE (C++/CX)")
+    #    set(CMAKE_CXX_STANDARD 17)
+    #
+    #    if(MSVC)
+    #        # SOLUZIONE 1 (CONSERVATIVA): Rimuoviamo /ZW:nostdlib.
+    #        # Questo permette a MSVC di caricare in autonomia platform.winmd ed i tipi base.
+    #        add_compile_options(
+    #                /ZW
+    #                /EHsc-
+    #                /EHa
+    #        )
+    #
+    #        # Manteniamo le inclusioni dei metadati dell'SDK per le interfacce superiori come IAsyncAction
+    #        string(APPEND CMAKE_CXX_FLAGS " /AI\"C:/Program Files (x86)/Windows Kits/10/UnionMetadata\"")
+    #        string(APPEND CMAKE_CXX_FLAGS " /AI\"C:/Program Files (x86)/Windows Kits/10/UnionMetadata/10.0.22621.0\"")
+    #
+    #        add_link_options(/APPCONTAINER)
+    #    else()
+    #        message(FATAL_ERROR "[MALAMORE] Il supporto C++/CX (UWP) richiede tassativamente il compilatore MSVC!")
+    #    endif()
+    #
+    #    # =========================================================================
+    #    # CONFIGURAZIONE STRATO 3: USER-MODE DESKTOP TRADIZIONALE (RING 3)
+    #    # =========================================================================
+else()
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_VERBOSE_MAKEFILE ON)
+    message(STATUS "[MALAMORE 💻] Configurazione Build: USER-MODE DESKTOP (Win32)")
+    # Compilazione standard per i test sequenziali di telemetria
+endif()
+
+include_directories(include)
 add_subdirectory(submodules/Catch2)
+add_subdirectory(submodules/ftxui)
+include_directories(submodules/json/include)
+include_directories(submodules/ftxui/include)
+include_directories(submodules/tqdmcpp2)
 
 # ==============================================================================
 # CONFIGURAZIONI DEL DRIVER (Modifica qui i tuoi parametri)
@@ -76,18 +148,35 @@ message(STATUS "Python trovato in: ${Python_EXECUTABLE}")
 
 set(EXPORT_DRIVER_NAME "driver_lettura")
 
-add_executable(client_malamore client_malamore.cpp
-        ReadTelemetryFile.cpp)
+#add_executable(client_malamore client_malamore.cpp
+#        ReadTelemetryFile.cpp
+#        )
 
 # Aggiunta del driver (rimosso EXCLUDE_FROM_ALL per farlo compilare di default)
 wdk_add_driver(${DRIVER_NAME}
         KMDF 1.15
         WINVER ${WDK_WINVER}
-        simple_driver.cpp
-        src/malamore/thread_generic_polling.cpp
-        src/malamore/service_manager.cpp
-        src/malamore/ipc_manager.cpp
-        src/tasks/task_lettura.c     # <--- QUI AGGIUNGI IL TUO FILE C
+        src/malamore/driver/malamore_driver.cpp
+        src/malamore/utility/streambuf/MalamoreIOStream.cpp
+        src/malamore/utility/telemetry_formatter.cpp
+        src/malamore/utility/Path.cpp
+        src/malamore/utility/streambuf/KernelStreamBuf.cpp
+        src/malamore/utility/streambuf/MalamoreIStream.cpp
+        src/malamore/utility/streambuf/MalamoreOStream.cpp
+
+        src/malamore/structures/InterProcessChannelData.cpp
+        src/malamore/structures/MessageMap.cpp
+        src/malamore/structures/TelemetryQueue.cpp
+
+        src/malamore/threads/ThreadGuard.cpp
+        src/malamore/threads/thread_pool.cpp
+
+        src/malamore/wrapper_tasks/hardware_reader.cpp
+        src/malamore/wrapper_tasks/telemetry_writer.cpp
+
+        src/malamore/winapi_client/Win32NamedPipeGuard.cpp
+
+        src/yaucl/data/csv.cpp
 )
 target_compile_definitions(${DRIVER_NAME} PRIVATE LINK_KERNEL NTDDI_VERSION=0x0A00000C _WIN32_MINNT=0x0A00)
 
@@ -195,19 +284,26 @@ add_custom_target(CertificaDriver ALL
 ### This library provides the support for enabling objects also at the user level, not necessarily at the kernel level
 ### This should help with the debugging facility.
 add_library(user_level_struct_library OBJECT
-        src/malamore/structures/InterProcessChannelData.cpp
-        src/malamore/structures/MessageMap.cpp
-        src/malamore/structures/TelemetryQueue.cpp
-        src/malamore/threads/ThreadGuard.cpp
+        src/malamore/utility/streambuf/MalamoreIOStream.cpp
+        src/malamore/utility/telemetry_formatter.cpp
         src/malamore/utility/Path.cpp
         src/malamore/utility/streambuf/KernelStreamBuf.cpp
         src/malamore/utility/streambuf/MalamoreIStream.cpp
         src/malamore/utility/streambuf/MalamoreOStream.cpp
+
+        src/malamore/structures/InterProcessChannelData.cpp
+        src/malamore/structures/MessageMap.cpp
+        src/malamore/structures/TelemetryQueue.cpp
+
+        src/malamore/threads/ThreadGuard.cpp
         src/malamore/threads/thread_pool.cpp
+
         src/malamore/wrapper_tasks/hardware_reader.cpp
         src/malamore/wrapper_tasks/telemetry_writer.cpp
+
         src/malamore/winapi_client/Win32NamedPipeGuard.cpp
-        src/malamore/utility/streambuf/MalamoreIOStream.cpp
+
+        src/yaucl/data/csv.cpp
 )
 
 add_executable(writing_thread_test tests/writing_thread_test.cpp)
@@ -219,21 +315,40 @@ target_link_libraries(structures_test Catch2WithMain user_level_struct_library)
 add_executable(test_read_driver TestReadDriver.cpp)
 target_link_libraries(test_read_driver user_level_struct_library)
 
-add_executable(test_architecture tests/test_architecture.cpp
-        src/malamore/structures/InterProcessChannelData.cpp
-        src/malamore/structures/MessageMap.cpp
-        src/malamore/structures/TelemetryQueue.cpp
-        src/malamore/threads/ThreadGuard.cpp
-        src/malamore/utility/Path.cpp
-        src/malamore/utility/streambuf/KernelStreamBuf.cpp
-        src/malamore/utility/streambuf/MalamoreIStream.cpp
-        src/malamore/utility/streambuf/MalamoreOStream.cpp
-        src/malamore/threads/thread_pool.cpp
-        src/malamore/wrapper_tasks/hardware_reader.cpp
-        src/malamore/wrapper_tasks/telemetry_writer.cpp
-        src/malamore/winapi_client/Win32NamedPipeGuard.cpp
-        src/malamore/utility/streambuf/MalamoreIOStream.cpp
-)
-target_link_libraries(test_architecture Catch2WithMain )
+add_executable(test_architecture tests/test_architecture.cpp)
+target_link_libraries(test_architecture Catch2WithMain user_level_struct_library)
 
-add_executable(read_telemetry_file ReadTelemetryFile.cpp)
+add_executable(read_telemetry_file ReadTelemetryFile.cpp
+        src/malamore/utility/telemetry_formatter.cpp)
+
+add_executable(test_arch TestArchitecture.cpp)
+target_link_libraries(test_arch  user_level_struct_library)
+
+
+
+if(LINK_KERNEL)
+
+
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 2: APP UWP / WINDOWS IOT CORE (COMPILATORE C++/CX)
+    # =========================================================================
+elseif(LINK_UWP_IOT)
+
+#    add_executable(TestIoTThread TestIoTThread.cpp src/malamore/threads/ThreadGuard.cpp)
+else()
+    # =========================================================================
+    # CONFIGURAZIONE STRATO 3: USER-MODE DESKTOP TRADIZIONALE (RING 3)
+    # Osserva che la modalità IoT non supporta l'accesso e la modifica dei registri. Devo essere per forza qui.
+    # =========================================================================
+    add_executable(ClientReserveCPUs ClientReserveCPUs.cpp src/malamore/winapi_client/reserve_cpus.cpp)
+    target_link_libraries(ClientReserveCPUs
+            PRIVATE ftxui::screen
+            PRIVATE ftxui::dom
+            PRIVATE ftxui::component  # Not needed for this example.
+    )
+endif()
+
+
+#add_executable(test_csv_read csv_reader_test.cpp )
+#target_link_libraries(test_csv_read user_level_struct_library)
+
