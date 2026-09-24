@@ -180,7 +180,8 @@ NTSTATUS CorePool_RegisterHwReader(
     const WCHAR* devicePath,
     ULONG readTimeoutUs,
     ULONG samplingPeriodUs,
-    ULONG targetTaskId
+    ULONG targetTaskId,
+    BOOL  asynch
 ) {
 
     if (g_PoolRegistry.IsRegistryActive == 0) {
@@ -219,7 +220,7 @@ NTSTATUS CorePool_RegisterHwReader(
     // CORREZIONE HARDWARE: Utilizziamo la funzione sicura del kernel per copiare la stringa WCHAR
     // Sostituisce wcscpy_s dello spazio utente
     // NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
-    auto idx = MalamoreDevicePool_AddDevicePath(devicePath);
+    auto idx = MalamoreDevicePool_AddDevicePath(devicePath, asynch);
     if (idx == -1) {
         KdPrint(("[CorePool_RegisterHwReader] Cannot copy the devicePath to ctx->DevicePath \n"));
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -323,7 +324,7 @@ void MalamoreDevicePool_Initialize(void) {
 }
 
 extern "C"
-int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath) {
+int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath, BOOL asynch) {
     if (devicePath == NULL || devicePath[0] == L'\0') {
         return -1;
     }
@@ -341,7 +342,11 @@ int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath) {
             RtlStringCchCopyW(g_PoolRegistry.Devices[i].DevicePath, MALAMORE_PATH_MAX, devicePath);
 
             // Tentativo di apertura asincrona tramite il layer di compatibilità unificato
-            NTSTATUS status = g_PoolRegistry.Devices[i].Stream.Open( devicePath, StreamFlags::Read | StreamFlags::Write);
+            auto flags = StreamFlags::Read | StreamFlags::Write;
+            if (asynch) {
+                flags |= StreamFlags::ASync;
+            }
+            NTSTATUS status = g_PoolRegistry.Devices[i].Stream.Open( devicePath, flags);
 
             if (NT_SUCCESS(status)) {
                 g_PoolRegistry.Devices[i].InUse = 1;

@@ -86,7 +86,8 @@ extern "C" {
 #endif
 
     NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse);
-    NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId);
+NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId,
+BOOL  asynch);
     NTSTATUS CorePool_StartPoolExecution();
     VOID CorePool_ShutdownAndClear();
 
@@ -113,7 +114,7 @@ extern "C" {
      * Se esiste già, restituisce l'indice. Altrimenti occupa il primo slot libero ed esegue la Open.
      * Ritorna l'indice assegnato [0...N-1] oppure -1 in caso di fallimento o pool esaurito.
      */
-    int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath);
+    int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath, BOOL asynch);
 
     /**
      * Pulisce e chiude la risorsa cercando per stringa letterale del percorso.

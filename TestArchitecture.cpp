@@ -16,7 +16,7 @@
 void OnPipeClientConnected2(PVOID Context, NTSTATUS CompletionStatus) {
     // UNREFERENCED_PARAMETER(Context);
     if (NT_SUCCESS(CompletionStatus)) {
-        KdPrint("[CALLBACK NOTIFY ✅] Il client del framework si è connesso asincronamente alla risorsa!\n");
+        KdPrint(("[CALLBACK NOTIFY ✅] Il client del framework si è connesso asincronamente alla risorsa!\n"));
     }
     if (Context) {
         *((ULONG*)Context) = 1;
@@ -33,7 +33,7 @@ void main() {
     auto devicePath = hardwarePipeServer.GetPath().wstring();
     auto status = CorePool_InitializeRegistry(75); // The main task is actually activated here
     (NT_SUCCESS(status));
-    status = CorePool_RegisterHwReader(devicePath, 200, 3333, TELEMETRY_WRITER_ID);
+    status = CorePool_RegisterHwReader(devicePath, 200, 3333, TELEMETRY_WRITER_ID, 0);
     (NT_SUCCESS(status));
     // This should start the hardware service starting to read some messages from the socket
     status = CorePool_StartPoolExecution();
