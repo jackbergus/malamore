@@ -256,48 +256,5 @@ int main(void) {
             }
         }
     }
-
-
-    HANDLE h = 0;
-    DWORD tmp;
-
-
-
-    /* Open port 0 in a blocking IO mode */
-    h = CreateFile("\\\\.\\FSCC2",             GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            NULL,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-            NULL);
-    fprintf(stderr, "Test LastError %d\n", GetLastError());
-    if (h == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "CreateFile failed with %d\n", GetLastError());
-        return EXIT_FAILURE;
-    }
-    int result;
-    //
-    // /* Send "Hello world!" text */
-    // auto result = WriteFile(h, odata, sizeof(odata), &tmp, NULL);
-    //
-    //
-    // result =fscc_write(h, odata, sizeof(odata), &tmp, NULL);
-    // if (result) {
-    //     fprintf(stderr, "WriteFile failed with %d\n", GetLastError());
-    //     if (result != ERROR_IO_PENDING) {
-    //         return EXIT_FAILURE;
-    //     }
-    // }
-
-    /* Read the data back in (with our loopback connector) */
-    result =  fscc_read_with_timeout(h, idata, sizeof(idata), &tmp, 3000);
-    if (result) {
-        fprintf(stderr, "ReadFile failed with %d\n", GetLastError());
-        return EXIT_FAILURE;
-    }
-
-    fprintf(stdout, "RCV: %s\n", idata);
-    CloseHandle(h);
-
     return EXIT_SUCCESS;
 }

@@ -26,25 +26,30 @@ void OnPipeClientConnected2(PVOID Context, NTSTATUS CompletionStatus) {
 void main() {
     char output_buffer[1024];
     ULONG result = 0;
-    Win32NamedPipeGuard hardwarePipeServer(2);
-    (NT_SUCCESS(hardwarePipeServer.Create(L"HWDriverSimulator", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
-    (NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected2, &result)));
-
-    auto devicePath = hardwarePipeServer.GetPath().wstring();
+    // Win32NamedPipeGuard hardwarePipeServer(2);
+    // (NT_SUCCESS(hardwarePipeServer.Create(L"HWDriverSimulator", StreamFlags::Read | StreamFlags::Write, sizeof(output_buffer))));
+    // (NT_SUCCESS(hardwarePipeServer.ListenAsync(OnPipeClientConnected2, &result)));
+    MalamorePath driver_path{L"\\\\.\\FSCC2"};
+    MalamoreIOStream device;
+    if (!NT_SUCCESS(device.Open(L"\\\\.\\FSCC2", StreamFlags::Write | StreamFlags::Read | StreamFlags::ASync))) {
+        KdPrint(("ERROR @ creating the connection"));
+        return;
+    }
+    // auto devicePath = hardwarePipeServer.GetPath().wstring();
     auto status = CorePool_InitializeRegistry(75); // The main task is actually activated here
-    (NT_SUCCESS(status));
-    status = CorePool_RegisterHwReader(devicePath, 200, 3333, TELEMETRY_WRITER_ID, 0);
-    (NT_SUCCESS(status));
+    // (NT_SUCCESS(status));
+    status = CorePool_RegisterHwReader(L"\\\\.\\FSCC2", 200, 3333, TELEMETRY_WRITER_ID, 0);
+    // (NT_SUCCESS(status));
     // This should start the hardware service starting to read some messages from the socket
     status = CorePool_StartPoolExecution();
-    (NT_SUCCESS(status));
+    // (NT_SUCCESS(status));
 
     // Waiting for five seconds before starting simuilating the hardware sending signals
     std::this_thread::sleep_for(std::chrono::seconds(3));
     LARGE_INTEGER currentTime;
 
     auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(3);
+    auto end_time = start_time + std::chrono::seconds(60);
     long long iteration_count = 0;
 
     // Loop until the specified time has passed
@@ -52,7 +57,8 @@ void main() {
         std::this_thread::sleep_for(std::chrono::microseconds(3333));
         currentTime = KeQueryPerformanceCounter(nullptr);
         snprintf(output_buffer, sizeof(output_buffer), "Msg #%llu @%llu\n", iteration_count, currentTime.QuadPart);
-        hardwarePipeServer.Write(output_buffer, strlen(output_buffer), &result);
+        device.Sputn(output_buffer, strlen(output_buffer));
+        device.Flush();
         iteration_count++;
     }
 
