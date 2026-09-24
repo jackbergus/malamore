@@ -231,6 +231,8 @@ int fscc_read_with_timeout(HANDLE h, char *buf, unsigned size,
  * It only makes sense reading
  */
 int main(void) {
+    char idata[20];
+    memset(idata, 0, sizeof(idata));
     char odata[] = "Hello worldo!";
     char odata2[] = "Prima Io!";
     MalamorePath driver_path{L"\\\\.\\FSCC2"};
@@ -238,13 +240,15 @@ int main(void) {
 
     {
         MalamoreIOStream device;
-
-
         if (NT_SUCCESS(device.Open(L"\\\\.\\FSCC2", StreamFlags::Write | StreamFlags::Read | StreamFlags::ASync))) {
             if (device.Sputn(odata2, sizeof(odata2))) {
                 if (!device.Flush()) {
                     fprintf(stderr, "Flush failed with %d\n", GetLastError());
                     return EXIT_FAILURE;
+                } else {
+                    unsigned long written;
+                    auto read = device.ReadWithTimeout(idata, sizeof(idata), 100, &written);
+                    printf("%s\n", NtStatusToString(read));
                 }
             } else {
                 fprintf(stderr, "Internal buffer write failed with %d\n", GetLastError());
@@ -257,7 +261,7 @@ int main(void) {
     HANDLE h = 0;
     DWORD tmp;
 
-    char idata[20];
+
 
     /* Open port 0 in a blocking IO mode */
     h = CreateFile("\\\\.\\FSCC2",             GENERIC_READ | GENERIC_WRITE,

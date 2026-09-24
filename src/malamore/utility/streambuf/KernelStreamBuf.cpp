@@ -716,6 +716,9 @@ NTSTATUS KernelStreamBuf::Sgetn_Blocking(char *s, size_t count, ULONG *bytesActu
     }
 
     if (NT_SUCCESS(status)) {
+        if (GetFileType(m_FileHandle) == FILE_TYPE_CHAR && (m_GlobalIoEvent.Handle != INVALID_HANDLE_VALUE) && ((uint64_t)m_GlobalIoEvent.Handle != 0xcccccccccccccccc)) {
+            CloseHandle(m_GlobalIoEvent.Handle);
+        }
         *bytesActuallyRead = static_cast<ULONG>(m_GlobalIoStatus.Information);
     }
     return status;

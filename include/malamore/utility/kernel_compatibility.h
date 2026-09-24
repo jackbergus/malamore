@@ -475,6 +475,8 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
             currentFilePointer.LowPart = SetFilePointer(FileHandle, 0, &currentFilePointer.HighPart, FILE_CURRENT);
             pMyOverlapped->Offset = currentFilePointer.LowPart;
             pMyOverlapped->OffsetHigh = currentFilePointer.HighPart;
+        } else if (fileType == FILE_TYPE_CHAR) {
+            pMyOverlapped->hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
         }
 
         DWORD bytesRead = 0;
