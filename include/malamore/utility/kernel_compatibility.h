@@ -562,6 +562,11 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
     UNREFERENCED_PARAMETER(ApcContext);
     UNREFERENCED_PARAMETER(ByteOffset);
     UNREFERENCED_PARAMETER(Key);
+    static OVERLAPPED o2;
+    static bool initialized = false;
+    if (!initialized) {
+        memset(&o2, 0, sizeof(o2));
+    }
 
     if (FileHandle == NULL || FileHandle == INVALID_HANDLE_VALUE || IoStatusBlock == NULL || Buffer == NULL) {
         return STATUS_INVALID_PARAMETER; //
@@ -589,6 +594,8 @@ UNREFERENCED_PARAMETER(ApcRoutine); UNREFERENCED_PARAMETER(ApcContext); UNREFERE
         }
         pMyOverlapped->Internal = 0;
         pMyOverlapped->InternalHigh = 0;
+    } else if (fileType == FILE_TYPE_CHAR) {
+        pMyOverlapped = &o2;
     }
     // Allocazione di sbarramento per il contesto asincrono di Win32
     // OVERLAPPED overlappedContext;

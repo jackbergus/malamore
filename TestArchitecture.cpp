@@ -16,7 +16,7 @@
 void OnPipeClientConnected2(PVOID Context, NTSTATUS CompletionStatus) {
     // UNREFERENCED_PARAMETER(Context);
     if (NT_SUCCESS(CompletionStatus)) {
-        printf("[CALLBACK NOTIFY ✅] Il client del framework si è connesso asincronamente alla risorsa!\n");
+        KdPrint("[CALLBACK NOTIFY ✅] Il client del framework si è connesso asincronamente alla risorsa!\n");
     }
     if (Context) {
         *((ULONG*)Context) = 1;
@@ -44,7 +44,7 @@ void main() {
     LARGE_INTEGER currentTime;
 
     auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(60);
+    auto end_time = start_time + std::chrono::seconds(3);
     long long iteration_count = 0;
 
     // Loop until the specified time has passed

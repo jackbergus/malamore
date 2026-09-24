@@ -30,6 +30,7 @@ int main() {
     std::vector<std::tuple<uint64_t, uint64_t, bool>> count_ticks_before_delay;
     uint64_t ticks_before_delay = 0;
     uint64_t delayed_ticks = 0;
+    constexpr static uint64_t MAX_MSG = 190;
 
     std::filesystem::path file{"Malamore_Telemetry_Sink.txt"};
     if (std::filesystem::is_regular_file(file)) {
@@ -75,7 +76,7 @@ int main() {
                     fromSendToRecv *= 1000;
                     fromSendToRecv /= ((double)telemetry.qpcFrequency.QuadPart);
                     // 2. Calcola i secondi interi e il resto dei tick
-                    if (total_messages < 3633) {
+                    if (total_messages < MAX_MSG) {
                         max_v = std::max(max_v, fromSendToRecv);
                         min_v = std::min(min_v, fromSendToRecv);
                         average += fromSendToRecv;
@@ -94,12 +95,13 @@ int main() {
                             }
                         }
                     }
+                    total_messages++;
                      // std::cout << "Message #" << messageId << std::endl;
                 }
-                total_messages++;
+
             }
             fclose(fptr);
-            average /= (double)3633;
+            average /= (double)MAX_MSG;
             for (const auto& [time_begin, time_delta, event] : count_ticks_before_delay) {
                 if (event) {
                     std::cout << "#reads <" << time_begin << ", " << time_delta << " reads before delay" << std::endl;

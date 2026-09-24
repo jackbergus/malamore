@@ -79,17 +79,14 @@ bool setInterruptMaskGlobally(DWORD64 interruptMask) {
         maxDevices++;
     }
 
-    auto A = tq::trange(maxDevices);
-    A.set_prefix("Updating device: ");
+    // auto A = tq::trange(maxDevices);
+    // A.set_prefix("Updating device: ");
 
-    for (DWORD i : A) {
-        if (!SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData)) {
-            continue;
-        }
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData); i++) {
         wchar_t instanceId[MAX_DEVICE_ID_LEN];
         if (CM_Get_Device_IDW(devInfoData.DevInst, instanceId, MAX_DEVICE_ID_LEN, 0) == CR_SUCCESS) {
             std::wstring currentDevice(instanceId);
-            A << "Device Name: " << wchar_to_string(currentDevice);
+            std::cout << "Device Name: " << wchar_to_string(currentDevice)  << std::endl;
 
             // // SALVAGUARDIA: Non tocchiamo la periferica di gioco (es. la GPU dedicata)
             // if (currentDevice.find(myGameGpuId) != std::wstring::npos) {

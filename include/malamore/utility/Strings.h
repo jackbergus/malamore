@@ -22,7 +22,7 @@ static inline std::string wchar_to_string(const std::wstring &wstr) {
     return result;
 }
 
-
+static inline
 std::ostream& hex_dump(std::ostream& os, const void *buffer,
                        std::size_t bufsize, bool showPrintableChars = true)
 {
@@ -52,7 +52,12 @@ std::ostream& hex_dump(std::ostream& os, const void *buffer,
             }
             os << '\n';
             rsptr = renderString;
-            linecount = min(maxline, bufsize);
+            //linecount = std::min(maxline, bufsize);
+            if (maxline > bufsize) {
+                linecount = bufsize;
+            } else {
+                linecount = maxline;
+            }
         }
     }
     // emit newline if we haven't already

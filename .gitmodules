@@ -13,3 +13,6 @@
 [submodule "submodules/tqdmcpp2"]
 	path = submodules/tqdmcpp2
 	url = https://github.com/mraggi/tqdm-cpp
+[submodule "submodules/magic_enum"]
+	path = submodules/magic_enum
+	url = https://github.com/Neargye/magic_enum
