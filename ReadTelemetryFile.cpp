@@ -30,7 +30,11 @@ int main() {
     std::vector<std::tuple<uint64_t, uint64_t, bool>> count_ticks_before_delay;
     uint64_t ticks_before_delay = 0;
     uint64_t delayed_ticks = 0;
-    constexpr static uint64_t MAX_MSG = 3777;
+    constexpr static uint64_t MAX_MSG = 18000;
+    bool first_read = true;
+    bool first_write = true;
+    ULONG64   last_read;
+    ULONG64   last_write;
 
     std::filesystem::path file{"Malamore_Telemetry_Sink.txt"};
     if (std::filesystem::is_regular_file(file)) {
@@ -69,9 +73,25 @@ int main() {
                 // hex_dump(std::cout, parcel.PayloadData, parcel.DataLength, true);
                 // std::cout << "'''" << std::endl << std::endl;
                 unsigned long long messageId, currentTimestamp;
-
                 int result = sscanf_s(reinterpret_cast<char const *>(parcel.PayloadData), "Msg #%llu @%llu\n", &messageId, &currentTimestamp);
                 if (result == 2) {
+                    if (first_read && first_write) {
+                        last_read = parcel.Timestamp;
+                        last_write = currentTimestamp;
+                        first_read = false;
+                        first_write = false;
+                    } else {
+                        double diff_read =  parcel.Timestamp - last_read;
+                        double diff_write = currentTimestamp - last_write;
+                        diff_read *= 1000;
+                        diff_read /= ((double)telemetry.qpcFrequency.QuadPart);
+                        diff_write *= 1000;
+                        diff_write /= ((double)telemetry.qpcFrequency.QuadPart);
+                        std::cout << "diff_read (ms)" << diff_read << std::endl;
+                        std::cout << "diff_write (ms)" << diff_write << std::endl;
+                        last_read = parcel.Timestamp;
+                        last_write = currentTimestamp;
+                    }
                     double fromSendToRecv = parcel.Timestamp - currentTimestamp;
                     fromSendToRecv *= 1000;
                     fromSendToRecv /= ((double)telemetry.qpcFrequency.QuadPart);
@@ -80,6 +100,7 @@ int main() {
                         max_v = std::max(max_v, fromSendToRecv);
                         min_v = std::min(min_v, fromSendToRecv);
                         average += fromSendToRecv;
+
                         if (fromSendToRecv > 0.400) {
                             delayed_ticks++;
                             sforamenti++;

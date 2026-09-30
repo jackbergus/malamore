@@ -36,6 +36,10 @@ public:
     MalamoreIOStream();
     ~MalamoreIOStream();
 
+    HANDLE GetHandle() {
+        return m_StreamBuf.GetHandle();
+    }
+
     NTSTATUS Open(const MalamorePath& path, ULONG flags);
     VOID Close();
     BOOLEAN IsOpen() const { return m_IsOpen; }

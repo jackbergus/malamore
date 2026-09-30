@@ -39,7 +39,7 @@ struct MalamoreTaskSlot {
 
 // Struttura interna della cella logica ad allocazione fitta
 typedef struct _MALAMORE_DEVICE_ENTRY {
-    MalamoreIStream Stream;
+    MalamoreIOStream Stream;
     WCHAR           DevicePath[MALAMORE_PATH_MAX];
     LONG            InUse; // Sbarra logica di occupazione: 0 = Libero, 1 = Occupato
 } MALAMORE_DEVICE_ENTRY;
@@ -86,8 +86,8 @@ extern "C" {
 #endif
 
     NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse);
-NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId,
-BOOL  asynch);
+    NTSTATUS CorePool_RegisterHwReader(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG targetTaskId,  ULONG initialDelayUs, BOOL  asynch);
+    NTSTATUS CorePool_RegisterHwWriter(const WCHAR* devicePath, ULONG readTimeoutUs, ULONG samplingPeriodUs, ULONG num_cycles, BOOL  asynch);
     NTSTATUS CorePool_StartPoolExecution();
     VOID CorePool_ShutdownAndClear();
 
@@ -114,7 +114,7 @@ BOOL  asynch);
      * Se esiste già, restituisce l'indice. Altrimenti occupa il primo slot libero ed esegue la Open.
      * Ritorna l'indice assegnato [0...N-1] oppure -1 in caso di fallimento o pool esaurito.
      */
-    int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath, BOOL asynch);
+    int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath, BOOL asynch, BOOL force);
 
     /**
      * Pulisce e chiude la risorsa cercando per stringa letterale del percorso.
@@ -132,7 +132,7 @@ BOOL  asynch);
      * Estrattore per accedere allo stream di riferimento di una determinata posizione.
      * Restituisce il puntatore all'istanza MalamoreIStream o NULL se lo slot è libero.
      */
-    MalamoreIStream* MalamoreDevicePool_GetStream(int index);
+    MalamoreIOStream* MalamoreDevicePool_GetStream(int index);
 
 
 #ifdef __cplusplus

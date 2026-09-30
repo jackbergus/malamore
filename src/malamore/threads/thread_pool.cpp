@@ -174,6 +174,65 @@ NTSTATUS CorePool_InitializeRegistry(ULONG PercentageToUse) {
     return STATUS_SUCCESS;
 }
 
+extern "C"
+NTSTATUS CorePool_RegisterHwWriter(
+    const WCHAR* devicePath,
+    ULONG readTimeoutUs,
+    ULONG samplingPeriodUs,
+    ULONG num_cycles,
+    BOOL  asynch
+) {
+
+    if (g_PoolRegistry.IsRegistryActive == 0) {
+        KdPrint(("[CorePool_RegisterHwReader] Inactive registry, cannot continue with registering an HW reader \n"));
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    // 3. SELEZIONE AUTOMATICA: Trova il primo slot omogeneo disponibile nel pool statico
+    struct MalamoreThreadSlot* slot = nullptr;
+    struct MalamoreTaskSlot* task = nullptr;
+    for (LONG i = 0; i < MAX_TOTAL_SLOTS; ++i) {
+        // Uno slot è libero se il suo tipo è impostato a THREAD_TYPE_FREE
+        if (g_PoolRegistry.ThreadPool[i].Type == THREAD_TYPE_FREE) {
+            slot = &g_PoolRegistry.ThreadPool[i];
+            task = &g_PoolRegistry.Tasks[i];
+            break;
+        }
+    }
+
+    // Se l'array statico unificato pre-allocato è saturo, respinge la richiesta per proteggere il sistema
+    if ((!slot) || (!task)) {
+        KdPrint(("[CorePool_RegisterGenericTask] It seems that all threads in the pool are locked. I cannot do anything more. \n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    slot->Type = THREAD_TYPE_HW_WRITER;
+    task->ContextAB[0] = slot;
+    auto* ctx = &slot->threadArgument.Context;
+    // struct UnifiedThreadContext* ctx = &slot->ContextA;
+    // slot->ProcessId = slot->SlotId;
+    ctx->PeriodUs = samplingPeriodUs;
+    ctx->MaxBudgetUs = readTimeoutUs;
+    ctx->num_cycles = num_cycles;
+    ctx->TaskFunctionPointer = HardwareWriterThreadRoutine;
+
+    // CORREZIONE HARDWARE: Utilizziamo la funzione sicura del kernel per copiare la stringa WCHAR
+    // Sostituisce wcscpy_s dello spazio utente
+    // NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
+    auto idx = MalamoreDevicePool_AddDevicePath(devicePath, asynch, 1);
+    if (idx == -1) {
+        KdPrint(("[CorePool_RegisterHwReader] Cannot copy the devicePath to ctx->DevicePath \n"));
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    ctx->DevicePath = &g_PoolRegistry.Devices[idx].Stream;
+    ctx->WRITER_DEVICE = ctx->DevicePath->GetHandle();
+    ctx->KeepRunning = 0;
+    ctx->PhaseOffsetTicks = 0;
+
+    g_PoolRegistry.CurrentHwThreadsCount++;
+    g_PoolRegistry.TotalAllocatedSlots++;
+    return STATUS_SUCCESS;
+}
 
 extern "C"
 NTSTATUS CorePool_RegisterHwReader(
@@ -181,6 +240,7 @@ NTSTATUS CorePool_RegisterHwReader(
     ULONG readTimeoutUs,
     ULONG samplingPeriodUs,
     ULONG targetTaskId,
+    ULONG initialDelayUs,
     BOOL  asynch
 ) {
 
@@ -213,6 +273,7 @@ NTSTATUS CorePool_RegisterHwReader(
     // struct UnifiedThreadContext* ctx = &slot->ContextA;
     // slot->ProcessId = slot->SlotId;
     ctx->PeriodUs = samplingPeriodUs;
+    ctx->InitialDelayUs = initialDelayUs;
     ctx->MaxBudgetUs = readTimeoutUs;
     ctx->TargetThreadId = targetTaskId;
     ctx->TaskFunctionPointer = HardwareReaderThreadRoutine;
@@ -220,7 +281,7 @@ NTSTATUS CorePool_RegisterHwReader(
     // CORREZIONE HARDWARE: Utilizziamo la funzione sicura del kernel per copiare la stringa WCHAR
     // Sostituisce wcscpy_s dello spazio utente
     // NTSTATUS strStatus = RtlStringCchCopyW(ctx->DevicePath, MAX_PATH, devicePath);
-    auto idx = MalamoreDevicePool_AddDevicePath(devicePath, asynch);
+    auto idx = MalamoreDevicePool_AddDevicePath(devicePath, asynch, 1);
     if (idx == -1) {
         KdPrint(("[CorePool_RegisterHwReader] Cannot copy the devicePath to ctx->DevicePath \n"));
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -242,10 +303,10 @@ NTSTATUS CorePool_StartPoolExecution() {
     // Cattura istantanea della costante di frequenza hardware della macchina
     currentTicks = KeQueryPerformanceCounter(&freq);
 
-    // Calcolo della Barriera Oraria Unica Globale (Tempo Attuale + 1ms di rincorsa)
+    // Calcolo della Barriera Oraria Unica Globale (Tempo Attuale + 3ms di rincorsa)
     // Questo millisecondo fornisce il budget di tempo necessario alla CPU per completare
     // i cambi di contesto e posizionare i thread sui core corretti prima dello scatto in fase.
-    ULONG64 synchronizedStart = currentTicks.QuadPart + (static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
+    ULONG64 synchronizedStart = currentTicks.QuadPart + 3*(static_cast<ULONG64>(freq.QuadPart) / 1000ULL);
     g_PoolRegistry.GlobalSynchronizedStartTicks = synchronizedStart;
     g_PoolRegistry.GlobalPerfCounterFrequency = freq.QuadPart;
 
@@ -257,16 +318,19 @@ NTSTATUS CorePool_StartPoolExecution() {
 
             switch (slot->Type) {
                 case THREAD_TYPE_TELEMETRY_WRITER:
+                case THREAD_TYPE_HW_WRITER:
                 case THREAD_TYPE_HW_READER: {
                     struct UnifiedThreadContext* ctx = &task->ContextAB[0]->threadArgument.Context;
                     ctx->SynchronizedStartTicks = synchronizedStart;
                     ctx->PerfCounterFrequency = freq.QuadPart;
                     ctx->KeepRunning = 1;
-
                     // Tentativo di spawn del System Thread
                     auto& t = task->ContextAB[0]->actualThread;
                     if (slot->Type == THREAD_TYPE_HW_READER) {
+                        ctx->SynchronizedStartTicks += (static_cast<ULONG64>(ctx->InitialDelayUs) * freq.QuadPart) / 1000000ULL;
                         t.Init(&task->ContextAB[0]->threadArgument, HardwareReaderThreadRoutine);
+                    } else if (slot->Type == THREAD_TYPE_HW_WRITER) {
+                        t.Init(&task->ContextAB[0]->threadArgument, HardwareWriterThreadRoutine);
                     } else { // THREAD_TYPE_TELEMETRY_WRITER
                         t.Init(&task->ContextAB[0]->threadArgument, TelemetrySink);
                     }
@@ -324,17 +388,20 @@ void MalamoreDevicePool_Initialize(void) {
 }
 
 extern "C"
-int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath, BOOL asynch) {
+int MalamoreDevicePool_AddDevicePath(const WCHAR* devicePath, BOOL asynch, BOOL force) {
     if (devicePath == NULL || devicePath[0] == L'\0') {
         return -1;
     }
 
     // 1. Cerca se il percorso esiste già nell'array statico
-    for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
-        if (g_PoolRegistry.Devices[i].InUse == 1 && wcscmp(g_PoolRegistry.Devices[i].DevicePath, devicePath) == 0) {
-            return i; // Trovato, restituisce l'indice esistente
+    if (!force) {
+        for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
+            if (g_PoolRegistry.Devices[i].InUse == 1 && wcscmp(g_PoolRegistry.Devices[i].DevicePath, devicePath) == 0) {
+                return i; // Trovato, restituisce l'indice esistente
+            }
         }
     }
+
 
     // 2. Se non esiste ed il manager ha ancora spazio, occupa il primo slot libero
     for (int i = 0; i < MALAMORE_MAX_DEVICES; i++) {
@@ -392,7 +459,7 @@ void MalamoreDevicePool_CleanDeviceByIndex(int index) {
 }
 
 extern "C"
-MalamoreIStream* MalamoreDevicePool_GetStream(int index) {
+MalamoreIOStream* MalamoreDevicePool_GetStream(int index) {
     if (index < 0 || index >= MALAMORE_MAX_DEVICES) {
         return NULL;
     }

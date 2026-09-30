@@ -31,6 +31,7 @@
 enum MalamoreThreadType {
     THREAD_TYPE_FREE = 0,
     THREAD_TYPE_HW_READER,
+    THREAD_TYPE_HW_WRITER,
     THREAD_TYPE_GENERIC_TASK,
     THREAD_TYPE_TELEMETRY_WRITER,
 };
@@ -70,9 +71,11 @@ struct UnifiedThreadContext {
     ULONG64 SynchronizedStartTicks;
     ULONG64 PhaseOffsetTicks;
 
+    ULONG   InitialDelayUs;
     ULONG   PeriodUs;
     ULONG   MaxBudgetUs;                // This works as a ReadTimeout for the Hardware Reader
     ULONG64 PerfCounterFrequency;
+    ULONG64 num_cycles;
 
     volatile LONG IsHighPriority;
     volatile LONG KeepRunning;
@@ -80,7 +83,8 @@ struct UnifiedThreadContext {
 
     PFN_FUTURE_THREAD_ROUTINE TaskFunctionPointer; // Puntatore allineato alla nuova firma
 
-    MalamoreIStream* DevicePath{nullptr};
+    MalamoreIOStream* DevicePath{nullptr};
+    HANDLE            WRITER_DEVICE{nullptr};
     // WCHAR DevicePath[MAX_PATH];
     ULONG TargetThreadId;
 
@@ -100,6 +104,7 @@ struct UnifiedThreadContext {
         if ((nextPeriodTime) && (Context))                                                                                                                                                  \
             ((LARGE_INTEGER*)nextPeriodTime)->QuadPart = ((struct UnifiedThreadContext*)Context)->SynchronizedStartTicks;                                                                   \
         const ULONG64 periodTicks = (static_cast<ULONG64>(((struct UnifiedThreadContext*)Context)->PeriodUs) * ((struct UnifiedThreadContext*)Context)->PerfCounterFrequency) / 1000000ULL;
+
 
 
 #define THREAD_PERIOD_LOOP_UNTIL_ALIVE(nextPeriodTime, currentTime, Context, Timestamp)                                                                                                            \

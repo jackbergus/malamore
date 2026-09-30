@@ -38,31 +38,23 @@ void main() {
     // auto devicePath = hardwarePipeServer.GetPath().wstring();
     auto status = CorePool_InitializeRegistry(75); // The main task is actually activated here
     // (NT_SUCCESS(status));
-    status = CorePool_RegisterHwReader(L"\\\\.\\FSCC2", 200, 3333, TELEMETRY_WRITER_ID, 0);
+    status = CorePool_RegisterHwReader(L"\\\\.\\FSCC2", 200, 3333, TELEMETRY_WRITER_ID, 355, 0);
+    status = CorePool_RegisterHwWriter(L"\\\\.\\FSCC2", 200, 3333, 18000, 0);
     // (NT_SUCCESS(status));
     // This should start the hardware service starting to read some messages from the socket
     status = CorePool_StartPoolExecution();
+
     // (NT_SUCCESS(status));
 
     // Waiting for five seconds before starting simuilating the hardware sending signals
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    std::this_thread::sleep_for(std::chrono::seconds(60));
     LARGE_INTEGER currentTime;
 
     auto start_time = std::chrono::steady_clock::now();
-    auto end_time = start_time + std::chrono::seconds(60);
+    auto end_time = start_time + std::chrono::seconds(3);
     long long iteration_count = 0;
 
-    // Loop until the specified time has passed
-    while (std::chrono::steady_clock::now() < end_time) {
-        std::this_thread::sleep_for(std::chrono::microseconds(3333));
-        currentTime = KeQueryPerformanceCounter(nullptr);
-        snprintf(output_buffer, sizeof(output_buffer), "Msg #%llu @%llu\n", iteration_count, currentTime.QuadPart);
-        device.Sputn(output_buffer, strlen(output_buffer));
-        device.Flush();
-        iteration_count++;
-    }
-
-    std::cout << "Iterations: " << iteration_count << std::endl;
+    std::cout << "Termination " <<  std::endl;
     CorePool_ShutdownAndClear();
 
 }
